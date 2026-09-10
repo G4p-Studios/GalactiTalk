@@ -5,12 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/matthew/golactitalk
-ExecStart=/home/matthew/golactitalk/.venv/bin/python /home/matthew/golactitalk/bot.py
+WorkingDirectory=/path/to/GalactiTalk
+ExecStart=/path/to/GalactiTalk/.venv/bin/python /path/to/GalactiTalk/bot.py
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
-# Environment=OPENAI_API_KEY=replace-me
+# Keep secrets in a mode-0600 file outside the repository if needed:
+# EnvironmentFile=%h/.config/galactitalk/environment
 
 [Install]
 WantedBy=default.target
