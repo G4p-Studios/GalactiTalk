@@ -42,14 +42,14 @@ def server_from_media(name: str, data: dict) -> ServerSettings:
         nickname="GalactiTalk", previous_nickname=team.get("nickname", ""),
         username=team.get("username", ""), password=team.get("password", ""),
         channel=str(team.get("channel", "/")), channel_password=team.get("channel_password", ""),
-        private_message_mode="chatgpt", status=team.get("status", ""), gender=team.get("gender", "n"),
+        status=team.get("status", ""), gender=team.get("gender", "n"),
         admins=list(users.get("admins", [])), banned_users=list(users.get("banned_users", [])),
         blocked_media_commands=list(data.get("general", {}).get("blocked_commands", [])),
         start_commands=list(data.get("general", {}).get("start_commands", [])),
     )
 
 
-def server_from_ini(name: str, section, mode: str) -> ServerSettings:
+def server_from_ini(name: str, section) -> ServerSettings:
     return ServerSettings(
         name=safe_name(name), host=section.get("host", ""), tcp_port=section.getint("tcp_port", fallback=10333),
         udp_port=section.getint("udp_port", fallback=section.getint("tcp_port", fallback=10333)),
@@ -57,7 +57,7 @@ def server_from_ini(name: str, section, mode: str) -> ServerSettings:
         previous_nickname=section.get("nickname", ""),
         username=section.get("username", ""), password=section.get("password", ""),
         channel=section.get("channel", "/"), channel_password=section.get("channel_password", ""),
-        enabled=parse_bool(section.get("enabled"), True), private_message_mode=mode,
+        enabled=parse_bool(section.get("enabled"), True),
     )
 
 
@@ -99,7 +99,6 @@ def migrate_config() -> tuple[AppConfig, list[tuple[str, ServerSettings]]]:
             send_channel_messages=bool(general.get("send_channel_messages", True)),
         ),
         bot=BotSettings(
-            command_prefix=star_bot.get("command_prefix", "!"),
             max_prompt_chars=chat_bot.getint("max_prompt_chars", fallback=6000),
             max_pending_per_server=chat_bot.getint("max_pending_per_server", fallback=8),
         ),
@@ -113,19 +112,14 @@ def migrate_config() -> tuple[AppConfig, list[tuple[str, ServerSettings]]]:
     for source, data in media_data:
         server = server_from_media(source, data)
         chosen[identity(server)] = server
-    for prefix, parser, mode in (("star", star_ini, "star"), ("chatgpt", chat_ini, "chatgpt")):
+    for prefix, parser in (("star", star_ini), ("chatgpt", chat_ini)):
         for section_name in parser.sections():
             if not section_name.startswith("server:"):
                 continue
             source = f"{prefix}_{section_name.split(':', 1)[1]}"
-            server = server_from_ini(source, parser[section_name], mode)
+            server = server_from_ini(source, parser[section_name])
             key = identity(server)
             if key in chosen:
-                # ChatGPT wins the ambiguous unprefixed-PM behavior; all features remain namespaced.
-                if mode == "chatgpt":
-                    chosen[key].private_message_mode = "chatgpt"
-                else:
-                    chosen[key].private_message_mode = "star"
                 legacy.append((source, server))
             else:
                 chosen[key] = server
@@ -216,7 +210,7 @@ def main() -> int:
             "nickname": server.nickname, "username": server.username, "password": server.password,
             "previous_nickname": server.previous_nickname,
             "channel": server.channel, "channel_password": server.channel_password,
-            "source_feature": server.private_message_mode,
+            "source_feature": "preserved alternate account",
         }
     with DESTINATION.open("w", encoding="utf-8") as stream:
         parser.write(stream)

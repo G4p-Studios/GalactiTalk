@@ -19,11 +19,11 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("[legacy-account:old]", text)
         self.assertEqual(validate_config(loaded), [])
 
-    def test_duplicate_names_and_modes_are_rejected(self):
-        config = AppConfig(servers=[ServerSettings("same", "one"), ServerSettings("same", "two", private_message_mode="bad")])
+    def test_duplicate_names_and_bad_ports_are_rejected(self):
+        config = AppConfig(servers=[ServerSettings("same", "one"), ServerSettings("same", "two", tcp_port=0)])
         errors = validate_config(config)
         self.assertTrue(any("Duplicate" in error for error in errors))
-        self.assertTrue(any("private_message_mode" in error for error in errors))
+        self.assertTrue(any("invalid port" in error for error in errors))
 
 
 if __name__ == "__main__":

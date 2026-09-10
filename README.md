@@ -53,29 +53,36 @@ Because TeamTalk provides one outbound media stream per connection, STAR audio
 is queued while that connection is playing a media track. Other configured
 servers remain entirely independent.
 
+## Command interface
+
+Every action requires a command and commands never begin with `/`. Plain
+private-message text is not sent to ChatGPT or STAR. Send `help` for the unified
+command list, or `help COMMAND` for detailed usage for any command. The old `h`,
+`/help`, and `!help` forms are intentionally not accepted.
+
 ## ChatGPT use
 
-In a channel, lead with `@[GalactiTalk]` or `@GalactiTalk`. Any private message
-is a ChatGPT prompt on servers whose `private_message_mode` is `chatgpt`.
+- `gpt PROMPT` — ask ChatGPT in a private message.
+- `clear` — clear your private context.
+- `status` — show ChatGPT, STAR, queue, and media status.
+- `clear-all` — TeamTalk/admin-list administrators only.
+- `restart`, `quit` — administrators only.
 
-- `/ai PROMPT` — ask ChatGPT explicitly on any server.
-- `/clear` (`/reset`) — clear your private context.
-- `/status` — show model, context, request queue, and media status.
-- `/clear-all` — TeamTalk/admin-list administrators only.
-- `/restart`, `/quit` — administrators only.
+In a channel, address the bot and include the command:
+
+```text
+@[GalactiTalk] gpt Explain why the sky is blue.
+```
 
 Channel and private conversation histories are separate, bounded, in memory,
 and sent with `store=false`. Channel prompts retain the speaker nickname.
 
 ## STAR use
 
-An unprefixed private message is spoken on servers whose
-`private_message_mode` is `star`. On every server, `/say TEXT` explicitly
-speaks text.
-
-- `!voices [FILTER]`, `!voice NAME|NUMBER` — discover/select voices.
-- `/rate NUMBER|none`, `/pitch NUMBER|none` — per-user voice parameters.
-- `!preview [VOICE]`, `!current`, `!status`, `!stop` — preview/status/queue controls.
+- `say TEXT` — synthesize text with STAR.
+- `voices [FILTER]`, `voice NAME|NUMBER` — discover/select voices.
+- `rate NUMBER|none`, `pitch NUMBER|none` — per-user voice parameters.
+- `preview [VOICE]`, `current`, `status`, `stop` — preview/settings, unified status, and STAR queue controls.
 
 Users must be in GalactiTalk's current channel before requesting speech.
 
@@ -85,7 +92,7 @@ Media commands are private messages and keep the original TTMediaBot compact
 names. YouTube is the only searchable media service. Direct URLs and admin-only
 local files/directories are still accepted by `u`.
 
-- `h` help; `a` about; `p QUERY` search/play; bare `p` pause/resume.
+- `a` about; `p QUERY` search/play; bare `p` pause/resume.
 - `u URL`, `s`, `b`, `n`, `c NUMBER` — URL, stop, previous, next, selection.
 - `sb [SECONDS]`, `sf [SECONDS]`, `v [VALUE]`, `sp [0.25-4]` — playback control.
 - `m [st|rt|tl|rtl|rnd]` — single/repeat/list/repeat-list/random mode.
@@ -97,6 +104,9 @@ Original administrative controls are retained: `bc`, `cg`, `cl`, `cn`, `cs`,
 Native TeamTalk administrators and usernames listed in each server's `admins`
 setting receive access. The `sc` command saves runtime changes back to the same
 INI while preserving disabled legacy-account sections.
+
+All of these commands have individual help topics—for example, `help p`,
+`help voice`, `help f`, and `help jc`.
 
 ## Configuration and security
 

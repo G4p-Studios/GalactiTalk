@@ -101,7 +101,6 @@ class MediaSettings:
 
 @dataclass
 class BotSettings:
-    command_prefix: str = "!"
     max_prompt_chars: int = 6000
     max_pending_per_server: int = 8
 
@@ -128,7 +127,6 @@ class ServerSettings:
     channel: str = "/"
     channel_password: str = ""
     enabled: bool = True
-    private_message_mode: str = "chatgpt"
     status: str = ""
     gender: str = "n"
     admins: list[str] = field(default_factory=list)
@@ -187,7 +185,6 @@ def read_config(path: Path) -> AppConfig:
             temp_dir=media.get("temp_dir", "").strip(),
         ),
         bot=BotSettings(
-            command_prefix=bot.get("command_prefix", "!") or "!",
             max_prompt_chars=int(bot.get("max_prompt_chars", 6000)),
             max_pending_per_server=int(bot.get("max_pending_per_server", 8)),
         ),
@@ -211,7 +208,6 @@ def read_config(path: Path) -> AppConfig:
             previous_nickname=s.get("previous_nickname", "").strip(),
             username=s.get("username", ""), password=s.get("password", ""), channel=s.get("channel", "/"),
             channel_password=s.get("channel_password", ""), enabled=parse_bool(s.get("enabled"), True),
-            private_message_mode=s.get("private_message_mode", "chatgpt").strip().casefold(),
             status=s.get("status", ""), gender=s.get("gender", "n").strip().casefold(),
             admins=parse_list(s.get("admins", "")), banned_users=parse_list(s.get("banned_users", "")),
             blocked_media_commands=parse_list(s.get("blocked_media_commands", "")),
@@ -248,7 +244,7 @@ def write_config(path: Path, config: AppConfig) -> None:
             "encrypted": "yes" if server.encrypted else "no", "nickname": server.nickname,
             "previous_nickname": server.previous_nickname,
             "username": server.username, "password": server.password, "channel": server.channel,
-            "channel_password": server.channel_password, "private_message_mode": server.private_message_mode,
+            "channel_password": server.channel_password,
             "status": server.status, "gender": server.gender, "admins": ", ".join(server.admins),
             "banned_users": ", ".join(server.banned_users),
             "blocked_media_commands": ", ".join(server.blocked_media_commands),
@@ -288,8 +284,6 @@ def validate_config(config: AppConfig) -> list[str]:
         names.add(server.name.casefold())
         if not 1 <= server.tcp_port <= 65535 or not 1 <= server.udp_port <= 65535:
             errors.append(f"Server {server.name} has an invalid port.")
-        if server.private_message_mode not in {"chatgpt", "star"}:
-            errors.append(f"Server {server.name} private_message_mode must be chatgpt or star.")
     return errors
 
 
@@ -333,7 +327,6 @@ def configure(path: Path) -> None:
         temp_dir=prompt("Media temporary directory (blank for system default)", old.media.temp_dir),
     )
     bot = BotSettings(
-        command_prefix=prompt("STAR private-message command prefix", old.bot.command_prefix),
         max_prompt_chars=prompt_int("Maximum ChatGPT prompt characters", old.bot.max_prompt_chars, 1),
         max_pending_per_server=prompt_int("Maximum queued ChatGPT requests per server", old.bot.max_pending_per_server, 1),
     )
@@ -356,7 +349,6 @@ def configure(path: Path) -> None:
             channel=prompt("Channel path to join", prior.channel),
             channel_password=prompt("Channel password", prior.channel_password, secret=True),
             enabled=prompt_bool("Enable this server", prior.enabled),
-            private_message_mode=prompt("Unprefixed PM mode (chatgpt or star)", prior.private_message_mode).casefold(),
             status=prompt("Status text", prior.status), gender=prompt("Gender (n, m, or f)", prior.gender).casefold(),
             admins=parse_list(prompt("Additional admin usernames (comma-separated)", ", ".join(prior.admins))),
             banned_users=parse_list(prompt("Banned usernames (comma-separated)", ", ".join(prior.banned_users))),

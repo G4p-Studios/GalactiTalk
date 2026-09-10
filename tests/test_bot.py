@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from galactitalk.bot import Connection, tt
+from galactitalk.bot import COMMAND_HELP, Connection, tt
 
 
 class RoutingTests(unittest.TestCase):
@@ -13,14 +13,38 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(pattern.match("@galactitalk: hello").group(1), "hello")
         self.assertIsNone(pattern.match("hello @GalactiTalk"))
 
-    def test_rate_slash_routes_to_star(self):
+    def test_bare_rate_routes_to_star(self):
         calls = []
         connection = SimpleNamespace(
             _is_banned=lambda _: False,
             _star_command=lambda user, command, arg: calls.append((user, command, arg)),
         )
-        Connection._handle_private(connection, 3, "/rate 1.25")
+        Connection._handle_private(connection, 3, "rate 1.25")
         self.assertEqual(calls, [(3, "rate", "1.25")])
+
+    def test_slash_commands_are_rejected(self):
+        replies = []
+        connection = SimpleNamespace(_is_banned=lambda _: False, _send_private=lambda user, text: replies.append(text))
+        Connection._handle_private(connection, 3, "/gpt hello")
+        self.assertIn("do not start with /", replies[0])
+
+    def test_plain_private_text_is_not_a_prompt(self):
+        replies = []
+        connection = SimpleNamespace(
+            _is_banned=lambda _: False, _media_commands=lambda: set(),
+            _send_private=lambda user, text: replies.append(text),
+        )
+        Connection._handle_private(connection, 3, "tell me a story")
+        self.assertIn("Unknown command", replies[0])
+
+    def test_every_command_has_detailed_help(self):
+        expected = Connection._media_commands() | {
+            "help", "gpt", "say", "clear", "clear-all", "status", "restart", "quit",
+            "voices", "voice", "rate", "pitch", "preview", "current", "stop",
+        }
+        self.assertEqual(set(COMMAND_HELP), expected)
+        self.assertNotIn("h", COMMAND_HELP)
+        self.assertTrue(all(text.startswith("Usage:") for text in COMMAND_HELP.values()))
 
     def test_native_media_playback_has_per_stream_gain(self):
         connection = SimpleNamespace(volume=50)

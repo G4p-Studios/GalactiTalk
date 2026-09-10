@@ -24,6 +24,67 @@ DONE_MEDIA = {tt.MediaFileStatus.MFS_FINISHED, tt.MediaFileStatus.MFS_ERROR, tt.
 MODES = {"st": "single track", "rt": "repeat track", "tl": "track list", "rtl": "repeat track list", "rnd": "random"}
 GENDERS = {"m": 0, "f": 256, "n": 4096}
 
+COMMAND_HELP = {
+    "help": "Usage: help [command]. Shows the unified command list, or detailed usage and behavior for one command. Slash-prefixed forms and the old h alias are not accepted.",
+    "gpt": "Usage: gpt PROMPT. Sends PROMPT to ChatGPT using your private conversation context. In a channel, address the bot and write: @GalactiTalk gpt PROMPT.",
+    "say": "Usage: say TEXT. Synthesizes TEXT with your selected STAR voice and streams it into the bot's channel. You must be in that channel.",
+    "clear": "Usage: clear. Clears only your private ChatGPT conversation context on this server.",
+    "clear-all": "Usage: clear-all. Administrator-only. Clears every private and channel ChatGPT context across the process.",
+    "status": "Usage: status. Shows ChatGPT model/context/queue state, STAR connectivity and voice count, and media playback state.",
+    "restart": "Usage: restart. Administrator-only. Restarts the complete GalactiTalk process and all server connections.",
+    "quit": "Usage: quit. Administrator-only. Stops the complete GalactiTalk process.",
+    "voices": "Usage: voices [filter]. Lists available STAR voices, optionally restricted to names containing filter, and saves the numbered result list for voice NUMBER.",
+    "voice": "Usage: voice NAME|NUMBER. Selects your STAR voice by exact/unique partial name or by number from your last voices result.",
+    "rate": "Usage: rate NUMBER|none. Sets or clears the rate parameter attached to your STAR synthesis requests.",
+    "pitch": "Usage: pitch NUMBER|none. Sets or clears the pitch parameter attached to your STAR synthesis requests.",
+    "preview": "Usage: preview [voice]. Synthesizes the configured preview sentence using the named voice or your selected/default voice.",
+    "current": "Usage: current. Shows your selected/default STAR voice and your current rate and pitch parameters.",
+    "stop": "Usage: stop. Stops the current STAR stream and clears queued STAR audio for this server connection. Media playback uses the separate s command.",
+    "a": "Usage: a. Shows a short description of GalactiTalk.",
+    "p": "Usage: p QUERY, or p with no argument. With QUERY, searches YouTube and plays the first result. With no argument, pauses or resumes media playback.",
+    "u": "Usage: u URL|PATH. Loads a supported URL or playlist. Administrators may also provide a local file or directory path.",
+    "s": "Usage: s. Stops media playback and clears the current media track.",
+    "b": "Usage: b. Plays the previous item in the current media list when the selected playback mode permits it.",
+    "n": "Usage: n. Plays the next item in the current media list when the selected playback mode permits it.",
+    "c": "Usage: c NUMBER. Plays a numbered item from the current media result or playlist; negative indexes count from the end.",
+    "sb": "Usage: sb [SECONDS]. Seeks media backward by SECONDS, or by the configured default seek step when omitted.",
+    "sf": "Usage: sf [SECONDS]. Seeks media forward by SECONDS, or by the configured default seek step when omitted.",
+    "v": "Usage: v [VOLUME]. Shows the media volume when omitted, or sets per-stream gain between 0 and the configured maximum.",
+    "sp": "Usage: sp [SPEED]. Shows playback speed when omitted, or sets a speed from 0.25 through 4. Changed-speed audio is prepared with FFmpeg.",
+    "m": "Usage: m [MODE]. Shows or selects media mode: st single, rt repeat track, tl list, rtl repeating list, or rnd random.",
+    "f": "Usage: f, f +, f -NUMBER, or f NUMBER. Lists favorites; adds the current track; deletes a favorite; or plays a favorite. Requires an authenticated username.",
+    "r": "Usage: r [NUMBER]. Lists migrated/recent media tracks, or plays the selected recent entry.",
+    "gl": "Usage: gl. Returns the original link or path for the current media track.",
+    "dl": "Usage: dl. Downloads the current non-live track and uploads it to the TeamTalk channel when the bot account has upload rights.",
+    "sv": "Usage: sv. Shows the active searchable media service. GalactiTalk intentionally provides only yt (YouTube/yt-dlp).",
+    "bc": "Usage: bc, bc +COMMAND, or bc -COMMAND. Administrator-only. Lists, blocks, or unblocks media commands for regular users.",
+    "cg": "Usage: cg n|m|f. Administrator-only. Changes the bot gender/status-mode flag on this server.",
+    "cl": "Usage: cl [LANGUAGE]. Administrator-only. Shows language support; built-in GalactiTalk messages currently use English.",
+    "cn": "Usage: cn NICKNAME. Administrator-only. Changes the live nickname and channel-mention matcher for this server.",
+    "cs": "Usage: cs [STATUS]. Administrator-only. Changes or clears the bot's TeamTalk status message.",
+    "cc": "Usage: cc. Administrator-only. Clears all shared media recents and favorites from the cache.",
+    "cm": "Usage: cm. Administrator-only. Toggles media-request announcements in TeamTalk channels.",
+    "jc": "Usage: jc CHANNEL [| PASSWORD]. Administrator-only. Joins a channel by path or numeric ID, optionally using a password after |.",
+    "l": "Usage: l. Administrator-only. Locks or unlocks media commands for regular users on this server.",
+    "ua": "Usage: ua, ua +USERNAME, or ua -USERNAME. Administrator-only. Lists or edits configured additional administrators.",
+    "ub": "Usage: ub, ub +USERNAME, or ub -USERNAME. Administrator-only. Lists or edits banned usernames.",
+    "eh": "Usage: eh. Administrator-only. Reports the built-in event handling state; connection and playback events are always enabled.",
+    "sc": "Usage: sc. Administrator-only. Saves runtime nickname, status, access-list, and toggle changes to config.ini.",
+    "va": "Usage: va. Administrator-only. Reports native media-transmission state; GalactiTalk does not use a sound-input voice route.",
+    "rs": "Usage: rs. Administrator-only media-compatible alias for restart.",
+    "q": "Usage: q. Administrator-only media-compatible alias for quit.",
+    "gcid": "Usage: gcid. Administrator-only. Returns the numeric ID of the bot's current TeamTalk channel.",
+}
+
+HELP_OVERVIEW = (
+    "GalactiTalk commands (no leading slash):\n"
+    "Core: help, gpt, say, clear, clear-all, status, restart, quit\n"
+    "STAR: voices, voice, rate, pitch, preview, current, stop\n"
+    "Media: a, p, u, s, b, n, c, sb, sf, v, sp, m, f, r, gl, dl, sv\n"
+    "Media administration: bc, cg, cl, cn, cs, cc, cm, jc, l, ua, ub, eh, sc, va, rs, q, gcid\n"
+    "Send help COMMAND for detailed usage. Plain text that does not begin with a command is ignored."
+)
+
 
 class RuntimeControl:
     def __init__(self) -> None:
@@ -173,8 +234,13 @@ class Connection(tt.TeamTalk, threading.Thread):
         if message.nMsgType == tt.TextMsgType.MSGTYPE_CHANNEL:
             match = self.mention.match(content)
             if match and match.group(1).strip():
-                self._submit_ai(f"channel:{self.server.name}:{message.nChannelID}", message.nFromUserID,
-                                match.group(1).strip(), lambda answer: self._send_channel(message.nChannelID, answer))
+                addressed = match.group(1).strip()
+                command, _, arguments = addressed.partition(" ")
+                if command.casefold() == "gpt" and arguments.strip():
+                    self._submit_ai(f"channel:{self.server.name}:{message.nChannelID}", message.nFromUserID,
+                                    arguments.strip(), lambda answer: self._send_channel(message.nChannelID, answer))
+                else:
+                    self._send_channel(message.nChannelID, f"Use: @[{self.server.nickname}] gpt PROMPT. Send the bot a private message containing help for all commands.")
             return
         self._handle_private(message.nFromUserID, content)
 
@@ -270,41 +336,41 @@ class Connection(tt.TeamTalk, threading.Thread):
             self._send_private(user_id, "You are banned from using this bot.")
             return
         command, _, rest = text.partition(" ")
-        slash = command.casefold()
-        if slash in {"/ai", "/chatgpt"}:
+        command = command.casefold()
+        rest = rest.strip()
+        if command.startswith("/"):
+            self._send_private(user_id, "Commands do not start with /. Send help for the unified command list.")
+            return
+        if command == "help":
+            self._send_private(user_id, self._help(rest))
+            return
+        if command == "gpt":
             if rest:
                 self._submit_ai(f"pm:{self.server.name}:{self._user_key(user_id)}", user_id, rest,
                                 lambda answer: self._send_private(user_id, answer))
             else:
-                self._send_private(user_id, "Usage: /ai your prompt")
+                self._send_private(user_id, COMMAND_HELP["gpt"])
             return
-        if slash in {"/say", "/speak"}:
+        if command == "say":
             self._speak(user_id, rest)
             return
-        if slash in {"/rate", "/pitch"}:
-            self._star_command(user_id, slash[1:], rest)
+        if command in {"voices", "voice", "rate", "pitch", "preview", "current", "stop"}:
+            self._star_command(user_id, command, rest)
             return
-        if slash in {"/voices", "/voice", "/select", "/preview", "/current", "/who", "/stop"}:
-            self._star_command(user_id, slash[1:], rest)
+        if command in {"clear", "clear-all", "status", "quit", "restart"}:
+            self._ai_command(user_id, command)
             return
-        ai_commands = {"/clear", "/reset", "/clear-all", "/status", "/help", "/quit", "/exit", "/shutdown", "/restart"}
-        if slash in ai_commands:
-            self._ai_command(user_id, slash)
-            return
-        prefix = self.config.bot.command_prefix
-        if text.startswith(prefix):
-            name, _, arg = text[len(prefix):].strip().partition(" ")
-            self._star_command(user_id, name.casefold(), arg.strip())
-            return
-        # Old media commands are intentionally still bare PM commands.
-        if command.casefold() in self._media_commands():
+        if command in self._media_commands():
             self._media_command(user_id, text, self._is_admin(user_id))
             return
-        if self.server.private_message_mode == "star":
-            self._speak(user_id, text)
-        else:
-            self._submit_ai(f"pm:{self.server.name}:{self._user_key(user_id)}", user_id, text,
-                            lambda answer: self._send_private(user_id, answer))
+        self._send_private(user_id, f"Unknown command: {command}. Send help for the unified command list.")
+
+    @staticmethod
+    def _help(topic: str = "") -> str:
+        if not topic:
+            return HELP_OVERVIEW
+        command = topic.split()[0].casefold()
+        return COMMAND_HELP.get(command, f"No help exists for {command}. Send help for the unified command list.")
 
     def _submit_ai(self, key: str, user_id: int, text: str, reply: Callable[[str], None]) -> None:
         if not self.ai:
@@ -326,42 +392,37 @@ class Connection(tt.TeamTalk, threading.Thread):
 
     def _ai_command(self, user_id: int, command: str) -> None:
         key = f"pm:{self.server.name}:{self._user_key(user_id)}"
-        if command in {"/clear", "/reset"}:
+        if command == "clear":
             if self.ai:
                 self.ai.reset(key)
             self._send_private(user_id, "Your private conversation context was cleared.")
-        elif command == "/clear-all":
+        elif command == "clear-all":
             if not self._is_admin(user_id):
                 self._send_private(user_id, "This command is restricted to TeamTalk administrators.")
             elif self.ai:
                 self.ai.reset_all(); self._send_private(user_id, "All private and channel contexts were cleared.")
-        elif command == "/status":
+        elif command == "status":
             model = self.ai.settings.model if self.ai else "unavailable"
             histories = self.ai.history_count() if self.ai else 0
-            self._send_private(user_id, f"Model: {model}. Contexts: {histories}. Queue: {self.pending_ai}. Media: {self.state}.")
-        elif command == "/help":
-            self._send_private(user_id, "GalactiTalk PM commands:\n/ai PROMPT - ask ChatGPT\n/say TEXT - synthesize with STAR\n"
-                               "/clear, /status - ChatGPT context controls\n!voices, !voice, !preview, !current - STAR controls\n"
-                               "h - all YouTube media commands\nAdministrators: /clear-all, /restart, /quit")
-        elif command in {"/quit", "/exit", "/shutdown", "/restart"}:
+            self._send_private(user_id, f"Model: {model}. Contexts: {histories}. GPT queue: {self.pending_ai}. "
+                               f"STAR: {self.star.connected_count()}/{len(self.star.connections)} connected, "
+                               f"{len(self.star.all_voices())} voices. Media: {self.state}.")
+        elif command in {"quit", "restart"}:
             if not self._is_admin(user_id):
                 self._send_private(user_id, "This command is restricted to TeamTalk administrators.")
             else:
-                self._send_private(user_id, "Restarting." if command == "/restart" else "Shutting down.")
-                self.control.request_stop(command == "/restart")
+                self._send_private(user_id, "Restarting." if command == "restart" else "Shutting down.")
+                self.control.request_stop(command == "restart")
 
     def _star_command(self, user_id: int, command: str, arg: str) -> None:
         key = self._user_key(user_id)
         voices = self.star.all_voices()
-        if command in {"help", "h", "?"}:
-            self._send_private(user_id, "STAR commands: !voices [filter], !voice NAME|NUMBER, /rate NUMBER|none, "
-                               "/pitch NUMBER|none, !preview [voice], !current, !stop")
-        elif command in {"voices", "v"}:
+        if command == "voices":
             matches = [v for v in voices if arg.casefold() in v.casefold()]
             self.voice_results[key] = matches
             limit = self.config.star.max_voice_results
             self._send_private(user_id, "\n".join(f"{i+1}. {v}" for i, v in enumerate(matches[:limit])) or "No matching voices are available.")
-        elif command in {"voice", "select"}:
+        elif command == "voice":
             selected = None
             if arg.isdigit():
                 results = self.voice_results.get(key, [])
@@ -378,8 +439,8 @@ class Connection(tt.TeamTalk, threading.Thread):
             if selected:
                 self.user_voices[key] = selected; self._send_private(user_id, f"Voice set to {selected}.")
             else:
-                self._send_private(user_id, "No matching voice. Use !voices first.")
-        elif command in {"current", "who"}:
+                self._send_private(user_id, "No matching voice. Send voices first. For details, send help voice.")
+        elif command == "current":
             self._send_private(user_id, f"Current voice: {self._voice(user_id) or 'none'}. Rate: {self.user_rates.get(key, 'none')}. Pitch: {self.user_pitches.get(key, 'none')}.")
         elif command in {"rate", "pitch"}:
             values = self.user_rates if command == "rate" else self.user_pitches
@@ -391,18 +452,12 @@ class Connection(tt.TeamTalk, threading.Thread):
                     if not math.isfinite(value): raise ValueError
                     values[key] = arg; self._send_private(user_id, f"{command.title()} set to {arg}.")
                 except ValueError:
-                    self._send_private(user_id, f"Usage: !{command} number|none")
+                    self._send_private(user_id, COMMAND_HELP[command])
         elif command == "preview":
             voice = arg or self._voice(user_id)
             self._request_star(user_id, voice, self.config.star.voice_preview_text.format(voice=voice))
-        elif command == "status":
-            self._send_private(user_id, f"STAR connections: {self.star.connected_count()}/{len(self.star.connections)}. Voices: {len(voices)}.")
         elif command == "stop":
             self._clear_star(); self._send_private(user_id, "STAR audio queue cleared.")
-        elif command in {"restart", "quit", "exit", "shutdown"}:
-            self._ai_command(user_id, "/restart" if command == "restart" else "/quit")
-        else:
-            self._send_private(user_id, "Unknown STAR command. Send !help for commands.")
 
     def _voice(self, user_id: int) -> str:
         return self.user_voices.get(self._user_key(user_id)) or self.config.star.default_voice
@@ -410,9 +465,9 @@ class Connection(tt.TeamTalk, threading.Thread):
     def _speak(self, user_id: int, text: str) -> None:
         voice = self._voice(user_id)
         if not text:
-            self._send_private(user_id, "Usage: /say text")
+            self._send_private(user_id, COMMAND_HELP["say"])
         elif not voice:
-            self._send_private(user_id, "Choose a STAR voice with !voice NAME.")
+            self._send_private(user_id, "Choose a STAR voice with voice NAME. Send help voice for details.")
         elif not self._same_channel(user_id):
             self._send_private(user_id, "You must be in the bot's channel to synthesize speech.")
         else:
@@ -464,7 +519,7 @@ class Connection(tt.TeamTalk, threading.Thread):
 
     @staticmethod
     def _media_commands() -> set[str]:
-        return {"h", "a", "p", "u", "sv", "s", "b", "n", "c", "sb", "sf", "v", "sp", "f", "m", "gl", "dl", "r",
+        return {"a", "p", "u", "sv", "s", "b", "n", "c", "sb", "sf", "v", "sp", "f", "m", "gl", "dl", "r",
                 "cg", "cl", "cn", "cs", "cc", "cm", "jc", "bc", "l", "ua", "ub", "eh", "sc", "va", "rs", "q", "gcid"}
 
     def _media_command(self, user_id: int, text: str, admin: bool, silent: bool = False) -> None:
@@ -478,12 +533,7 @@ class Connection(tt.TeamTalk, threading.Thread):
         admin_commands = {"cg", "cl", "cn", "cs", "cc", "cm", "jc", "bc", "l", "ua", "ub", "eh", "sc", "va", "rs", "q", "gcid"}
         if command in admin_commands and not admin:
             reply("This command is restricted to administrators."); return
-        if command == "h":
-            reply("Media commands:\np QUERY - search/play YouTube (or pause/resume)\nu URL - play URL, playlist, or admin local path\n"
-                  "s stop; b previous; n next; c NUMBER select; sb/sf [SECONDS] seek; v [0-MAX] volume; sp [0.25-4] speed\n"
-                  "m [st|rt|tl|rtl|rnd] mode; f [+|-NUMBER|NUMBER] favorites; r [NUMBER] recents; gl link; dl upload\n"
-                  "Admin: bc, cg, cl, cn, cs, cc, cm, jc, l, ua, ub, eh, sc, va, rs, q, gcid")
-        elif command == "a": reply("GalactiTalk: TeamTalk media, STAR speech, and ChatGPT in one multi-server client.")
+        if command == "a": reply("GalactiTalk: TeamTalk media, STAR speech, and ChatGPT in one multi-server client.")
         elif command == "p":
             if arg:
                 reply("Searching...")
