@@ -52,6 +52,57 @@ class MediaTransportTests(unittest.TestCase):
             self.assertEqual(unloads, [["pactl", "unload-module", "42"]])
             self.assertEqual(player.sink_name, "")
 
+    def test_starting_a_second_route_closes_rescans_and_restores_first(self):
+        devices = []
+        clients = []
+        closed = []
+
+        def client(handle):
+            value = SimpleNamespace(
+                getSoundDevices=lambda: devices,
+                initSoundInputDevice=Mock(return_value=True),
+                enableVoiceTransmission=Mock(),
+                _tt=handle,
+            )
+            clients.append(value)
+            return value
+
+        tt_module = SimpleNamespace(
+            ttstr=str,
+            _RestartSoundSystem=Mock(return_value=True),
+            _CloseSoundInputDevice=lambda handle: closed.append(handle),
+        )
+        module_ids = iter((41, 42))
+
+        def run(command, **kwargs):
+            if command[:3] == ["pactl", "load-module", "module-null-sink"]:
+                sink = next(item.split("=", 1)[1] for item in command if item.startswith("sink_name="))
+                devices.append(SimpleNamespace(szDeviceName=sink + ".monitor", szDeviceID="",
+                                               nMaxInputChannels=2, nDeviceID=len(devices) + 20))
+                return SimpleNamespace(returncode=0, stdout=f"{next(module_ids)}\n", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        processes = [Mock(), Mock()]
+        for process in processes:
+            process.poll.return_value = None
+        with patch("galactitalk.media_transport.subprocess.run", side_effect=run), \
+                patch("galactitalk.media_transport.subprocess.Popen", side_effect=processes), \
+                patch("galactitalk.media_transport.threading.Thread"):
+            first = PulseAudioMediaPlayer(client("first"), tt_module, "first", lambda *_: None)
+            second = PulseAudioMediaPlayer(client("second"), tt_module, "second", lambda *_: None)
+            first.start(Path("one.opus"), 50, 1, 100, 1)
+            second.start(Path("two.opus"), 50, 1, 100, 2)
+
+            self.assertEqual(tt_module._RestartSoundSystem.call_count, 2)
+            self.assertIn("first", closed)
+            self.assertEqual(clients[0].initSoundInputDevice.call_count, 2)
+            clients[0].enableVoiceTransmission.assert_called_with(True)
+            self.assertTrue(first.input_open)
+            self.assertTrue(second.input_open)
+
+            second.stop()
+            first.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

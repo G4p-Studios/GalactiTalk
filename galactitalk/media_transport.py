@@ -15,6 +15,7 @@ from typing import Callable
 
 
 _SOUND_SYSTEM_LOCK = threading.RLock()
+_ACTIVE_PLAYERS: set["PulseAudioMediaPlayer"] = set()
 
 
 class PulseAudioMediaPlayer:
@@ -31,6 +32,7 @@ class PulseAudioMediaPlayer:
         self.sink_name = ""
         self.socket_path: Path | None = None
         self.input_open = False
+        self.voice_enabled = False
         self.token = 0
 
     @staticmethod
@@ -69,15 +71,8 @@ class PulseAudioMediaPlayer:
                 if result.returncode:
                     raise RuntimeError(f"could not create the temporary PulseAudio route: {result.stderr.strip()}")
                 self.module_id = int(result.stdout.strip())
-                monitor = f"{self.sink_name}.monitor"
-                if not self.tt._RestartSoundSystem():
-                    raise RuntimeError("TeamTalk could not rescan the newly created audio route")
-                device_id = self._find_monitor_device(monitor)
-                if device_id is None:
-                    raise RuntimeError(f"TeamTalk did not discover temporary audio source {monitor}")
-                if not self.teamtalk.initSoundInputDevice(device_id):
-                    raise RuntimeError(f"TeamTalk could not open temporary audio source {monitor}")
-                self.input_open = True
+                _ACTIVE_PLAYERS.add(self)
+                self._rescan_and_reopen_routes()
 
             ipc_dir = Path(tempfile.gettempdir())
             self.socket_path = ipc_dir / f"gt-{os.getpid()}-{token}-{unique[-7:]}.sock"
@@ -96,6 +91,7 @@ class PulseAudioMediaPlayer:
             self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                             text=True, env=environment)
+            self.voice_enabled = True
             self.teamtalk.enableVoiceTransmission(True)
             process = self.process
             threading.Thread(target=self._watch, args=(process, token),
@@ -103,6 +99,61 @@ class PulseAudioMediaPlayer:
         except Exception:
             self.stop()
             raise
+
+    def _close_input_for_rescan(self) -> None:
+        if not self.input_open:
+            return
+        try:
+            self.teamtalk.enableVoiceTransmission(False)
+        except Exception:
+            pass
+        try:
+            self.tt._CloseSoundInputDevice(self.teamtalk._tt)
+        finally:
+            self.input_open = False
+
+    def _open_input(self) -> None:
+        monitor = f"{self.sink_name}.monitor"
+        device_id = self._find_monitor_device(monitor)
+        if device_id is None:
+            raise RuntimeError(f"TeamTalk did not discover temporary audio source {monitor}")
+        if not self.teamtalk.initSoundInputDevice(device_id):
+            raise RuntimeError(f"TeamTalk could not open temporary audio source {monitor}")
+        self.input_open = True
+
+    def _rescan_and_reopen_routes(self) -> None:
+        routes = [player for player in _ACTIVE_PLAYERS
+                  if player.module_id is not None and player.sink_name]
+        previously_open = [player for player in routes if player.input_open]
+        for player in previously_open:
+            player._close_input_for_rescan()
+
+        restarted = False
+        for _ in range(10):
+            if self.tt._RestartSoundSystem():
+                restarted = True
+                break
+            time.sleep(0.1)
+        if not restarted:
+            # A failed restart leaves TeamTalk's previous device list intact, so
+            # restore already-playing routes before reporting the new failure.
+            for player in previously_open:
+                try:
+                    player._open_input()
+                    player.teamtalk.enableVoiceTransmission(player.voice_enabled)
+                except Exception as exc:
+                    print(f"Could not restore audio route {player.sink_name}: {exc}")
+            raise RuntimeError("TeamTalk could not rescan the newly created audio route after closing all active bot inputs")
+
+        failures: list[str] = []
+        for player in routes:
+            try:
+                player._open_input()
+                player.teamtalk.enableVoiceTransmission(player.voice_enabled)
+            except Exception as exc:
+                failures.append(str(exc))
+        if failures:
+            raise RuntimeError("; ".join(failures))
 
     def _find_monitor_device(self, monitor: str) -> int | None:
         deadline = time.monotonic() + 3.0
@@ -150,6 +201,7 @@ class PulseAudioMediaPlayer:
             state = self._request(["get_property", "pause"], attempts=2)
             if state is not paused:
                 return False
+        self.voice_enabled = not paused
         self.teamtalk.enableVoiceTransmission(not paused)
         return True
 
@@ -180,21 +232,18 @@ class PulseAudioMediaPlayer:
             self.teamtalk.enableVoiceTransmission(False)
         except Exception:
             pass
+        self.voice_enabled = False
         with _SOUND_SYSTEM_LOCK:
             if self.input_open:
                 try:
-                    close = getattr(self.teamtalk, "closeSoundInputDevice", None)
-                    if close:
-                        close()
-                    else:
-                        self.tt._CloseSoundInputDevice(self.teamtalk._tt)
+                    self._close_input_for_rescan()
                 except Exception:
                     pass
-                self.input_open = False
             module_id, self.module_id = self.module_id, None
             if module_id is not None:
                 subprocess.run(["pactl", "unload-module", str(module_id)],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            _ACTIVE_PLAYERS.discard(self)
         if self.socket_path:
             self.socket_path.unlink(missing_ok=True)
             self.socket_path = None

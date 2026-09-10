@@ -8,7 +8,8 @@ import subprocess
 import sys
 
 
-PYTHON_MODULES = ("openai", "py7zr", "websockets", "yt_dlp", "youtubesearchpython")
+PYTHON_MODULES = (("openai", "py7zr", "websockets", "yt_dlp", "youtubesearchpython") +
+                  (("secretstorage",) if sys.platform.startswith("linux") else ()))
 SYSTEM_COMMANDS = ("mpv", "pactl")
 
 

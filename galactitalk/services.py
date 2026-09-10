@@ -310,6 +310,22 @@ class YouTubeService:
             options["cookiefile"] = str(cookie)
         return options
 
+    def _explain_error(self, exc: Exception) -> RuntimeError:
+        message = str(exc)
+        if "sign in to confirm" in message.casefold():
+            configured = Path(self.settings.cookiefile_path).expanduser() if self.settings.cookiefile_path else None
+            if configured:
+                return RuntimeError(
+                    f"YouTube rejected the configured cookies in {configured} as expired or not fully signed in. "
+                    "Export a fresh Netscape cookies.txt from a browser that is signed in to YouTube; "
+                    "the export must include the Google authentication cookies as well as youtube.com cookies."
+                )
+            return RuntimeError(
+                "YouTube requires a signed-in session for this connection. Configure media.youtube_cookiefile "
+                "with a fresh Netscape cookies.txt export from a browser signed in to YouTube."
+            )
+        return RuntimeError(message)
+
     def submit_search(self, query: str, callback: Callable) -> None:
         self.executor.submit(self._search_done, query, callback)
 
@@ -326,6 +342,7 @@ class YouTubeService:
         self.executor.submit(self._url_done, url, callback)
 
     def _url_done(self, url: str, callback: Callable) -> None:
+        youtube_host = False
         try:
             if Path(url).expanduser().exists():
                 path = Path(url).expanduser().resolve()
@@ -344,6 +361,9 @@ class YouTubeService:
                 info = ydl.extract_info(url, download=False, process=False)
             callback(None, self._tracks_from_info(info, url))
         except Exception as exc:
+            if youtube_host:
+                callback(str(self._explain_error(exc)), None)
+                return
             # Preserve TTMediaBot's direct-stream fallback for non-YouTube URLs.
             print(f"URL inspection failed for {url!r}; trying it as a direct stream: {exc}")
             callback(None, [Track(url, url, "direct")])
@@ -368,30 +388,36 @@ class YouTubeService:
         if track.kind == "direct":
             return track.source, False
         options = self._options() | {"noplaylist": True, "skip_download": True}
-        with YoutubeDL(options) as ydl:
-            info = ydl.extract_info(track.source, download=False)
-            track.name = info.get("title") or track.name
-            track.is_live = bool(info.get("is_live"))
-            stream_url = info.get("url")
-            if not stream_url:
-                requested = info.get("requested_formats") or info.get("requested_downloads") or []
-                stream_url = next((item.get("url") for item in requested if item.get("url")), None)
-            if not stream_url:
-                raise RuntimeError("yt-dlp did not return a playable audio stream")
-            return stream_url, track.is_live
+        try:
+            with YoutubeDL(options) as ydl:
+                info = ydl.extract_info(track.source, download=False)
+                track.name = info.get("title") or track.name
+                track.is_live = bool(info.get("is_live"))
+                stream_url = info.get("url")
+                if not stream_url:
+                    requested = info.get("requested_formats") or info.get("requested_downloads") or []
+                    stream_url = next((item.get("url") for item in requested if item.get("url")), None)
+                if not stream_url:
+                    raise RuntimeError("yt-dlp did not return a playable audio stream")
+                return stream_url, track.is_live
+        except Exception as exc:
+            raise self._explain_error(exc) from exc
 
     def download(self, track: Track, directory: Path) -> tuple[Path, bool]:
         options = self._options() | {
             "noplaylist": True, "outtmpl": str(directory / "media.%(ext)s"),
             "restrictfilenames": True,
         }
-        with YoutubeDL(options) as ydl:
-            info = ydl.extract_info(track.source, download=True)
-            if info.get("is_live"):
-                raise RuntimeError("Live streams cannot be uploaded")
-            requested = info.get("requested_downloads") or []
-            filename = requested[0].get("filepath") if requested else ydl.prepare_filename(info)
-            return Path(filename), False
+        try:
+            with YoutubeDL(options) as ydl:
+                info = ydl.extract_info(track.source, download=True)
+                if info.get("is_live"):
+                    raise RuntimeError("Live streams cannot be uploaded")
+                requested = info.get("requested_downloads") or []
+                filename = requested[0].get("filepath") if requested else ydl.prepare_filename(info)
+                return Path(filename), False
+        except Exception as exc:
+            raise self._explain_error(exc) from exc
 
     def close(self) -> None:
         self.executor.shutdown(wait=False, cancel_futures=True)

@@ -53,6 +53,23 @@ class YouTubeServiceTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(tracks[0].source, "https://www.youtube.com/watch?v=one")
 
+    def test_rejected_cookie_file_has_actionable_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cookiefile = Path(directory) / "cookies.txt"
+            cookiefile.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+            service = YouTubeService(MediaSettings(cookiefile_path=str(cookiefile)))
+            ydl = Mock()
+            ydl.extract_info.side_effect = RuntimeError("Sign in to confirm you're not a bot")
+            manager = Mock()
+            manager.__enter__ = Mock(return_value=ydl)
+            manager.__exit__ = Mock(return_value=False)
+            try:
+                with patch("galactitalk.services.YoutubeDL", return_value=manager), \
+                        self.assertRaisesRegex(RuntimeError, "rejected the configured cookies"):
+                    service.prepare(Track("https://youtube.test/watch?v=1"), Path(directory))
+            finally:
+                service.close()
+
 
 if __name__ == "__main__":
     unittest.main()
