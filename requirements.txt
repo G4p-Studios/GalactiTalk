@@ -1,0 +1,4 @@
+openai>=1.79,<3
+py7zr>=0.21,<2
+websockets>=13.1,<17
+yt-dlp

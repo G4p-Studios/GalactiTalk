@@ -1,0 +1,16 @@
+[Unit]
+Description=GalactiTalk multi-server TeamTalk bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/matthew/golactitalk
+ExecStart=/home/matthew/golactitalk/.venv/bin/python /home/matthew/golactitalk/bot.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+# Environment=OPENAI_API_KEY=replace-me
+
+[Install]
+WantedBy=default.target
