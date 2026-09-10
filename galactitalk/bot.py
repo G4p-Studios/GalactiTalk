@@ -26,7 +26,7 @@ GENDERS = {"m": 0, "f": 256, "n": 4096}
 COMMAND_HELP = {
     "help": "Usage: help [command]. Shows the unified command list, or detailed usage and behavior for one command. Slash-prefixed forms and the old h alias are not accepted.",
     "gpt": "Usage: gpt PROMPT. Sends PROMPT to ChatGPT using your private conversation context. In a channel, use @chatgpt PROMPT (case-insensitive).",
-    "say": "Usage: say TEXT. Synthesizes TEXT with your selected STAR voice and streams it into the bot's channel. You must be in that channel.",
+    "say": "Usage: say TEXT. Synthesizes TEXT with your selected STAR voice and streams it into the bot's channel, including while media is playing. You must be in that channel.",
     "clear": "Usage: clear. Clears only your private ChatGPT conversation context on this server.",
     "clear-all": "Usage: clear-all. Administrator-only. Clears every private and channel ChatGPT context across the process.",
     "status": "Usage: status. Shows ChatGPT model/context/queue state, STAR connectivity and voice count, and media playback state.",
@@ -457,7 +457,7 @@ class Connection(tt.TeamTalk, threading.Thread):
         self._start_waiting_stream()
 
     def _start_waiting_stream(self) -> None:
-        if self.state in {"playing", "paused"} or self.preparing or self.star_current:
+        if self.star_current:
             return
         try:
             self.star_current = self.star_queue.get_nowait()
@@ -558,8 +558,6 @@ class Connection(tt.TeamTalk, threading.Thread):
         self.state = "preparing"
         track = self.current_track
         self.media_player.stop()
-        if self.star_current:
-            self.stopStreamingMediaFileToChannel()
         old_temp, self.current_temp = self.current_temp, None
         if old_temp: old_temp.cleanup()
         def prepare():

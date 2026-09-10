@@ -10,6 +10,8 @@ All notable changes to GalactiTalk are documented here. The project follows
 - Matched TTMediaBot's status metadata behavior, including YouTube uploader
   names and live direct/local stream metadata in `artist - title - station`
   order.
+- STAR synthesis now streams immediately and concurrently with active media on
+  the same TeamTalk connection.
 
 ## [0.1.0] - 2026-09-10
 

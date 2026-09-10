@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from pathlib import Path
+import queue
 import tempfile
 import unittest
 
@@ -79,6 +80,32 @@ class RoutingTests(unittest.TestCase):
             Connection.onStreamMediaFile(connection, info)
             self.assertFalse(path.exists())
             self.assertEqual(started, [True])
+
+    def test_star_starts_while_media_is_playing_or_preparing(self):
+        started = []
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "first.wav"
+            second = Path(directory) / "second.wav"
+            first.write_bytes(b"audio")
+            second.write_bytes(b"audio")
+            star_queue = queue.Queue()
+            star_queue.put((first, 7, "voice"))
+            star_queue.put((second, 8, "voice"))
+            connection = SimpleNamespace(
+                state="playing",
+                preparing=True,
+                star_current=None,
+                star_queue=star_queue,
+                startStreamingMediaFileToChannel=lambda path, _: started.append(path) or True,
+                _send_private=lambda *_: None,
+            )
+
+            Connection._start_waiting_stream(connection)
+            self.assertEqual(connection.star_current, (first, 7, "voice"))
+            self.assertEqual(len(started), 1)
+
+            Connection._start_waiting_stream(connection)
+            self.assertEqual(len(started), 1)
 
     def test_media_status_uses_name_url_pause_and_default(self):
         changes = []

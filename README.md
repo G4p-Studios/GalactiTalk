@@ -140,8 +140,8 @@ memory, and sent with OpenAI storage disabled.
 | `stop` | Stop STAR audio and clear its queue for this server. |
 
 Users must be in the bot's current channel before requesting speech. STAR audio
-uses TeamTalk's media-file streaming and waits if media is active on that same
-connection.
+uses TeamTalk's media-file stream and plays concurrently with MPV media on the
+same connection. Additional STAR requests remain ordered in the STAR queue.
 
 ### YouTube and media
 
