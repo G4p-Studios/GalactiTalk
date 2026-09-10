@@ -104,20 +104,18 @@ files/directories are accepted by `u`.
 - `u URL`, `s`, `b`, `n`, `c NUMBER` — URL, stop, previous, next, selection.
 - `sb [SECONDS]`, `sf [SECONDS]`, `v [VALUE]`, `sp [0.25-4]` — playback control.
 - `m [st|rt|tl|rtl|rnd]` — single/repeat/list/repeat-list/random mode.
-- `f`, `r`, `gl`, `dl` — favorites, recents, direct link, channel upload.
+- `gl`, `dl` — direct link and channel upload.
 - `sv` — reports the sole `yt` service.
 
 The old TTMediaBot moderation and administrative command group is intentionally
 disabled for now, including configured administrators, command blocking,
 banning, locking, and their list editors. Native TeamTalk administrators still
 receive core administrator access. Every active command has an individual help
-topic—for example, `help p`, `help voice`, and `help f`.
+topic—for example, `help p`, `help voice`, and `help gl`.
 
 ## Configuration and security
 
 Prefer an `OPENAI_API_KEY` environment variable. `config.ini` also contains
 TeamTalk passwords and possibly an SDK license, so keep it owner-readable only.
-The shared `galactitalk-cache.json` contains migrated recents and favorites.
-
 GalactiTalk is independent and is not affiliated with OpenAI or BearWare.dk.
 See [THIRD_PARTY.md](THIRD_PARTY.md) for licensing boundaries.

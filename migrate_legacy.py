@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import configparser
-from collections import deque
 import json
 from pathlib import Path
-import pickle
 import re
 
 from galactitalk.config import (
     AppConfig, BotSettings, MediaSettings, OpenAISettings, ServerSettings,
     StarSettings, TeamTalkSettings, parse_bool, parse_list, write_config,
 )
-from galactitalk.services import Track
 
 
 HOME = Path.home()
@@ -124,78 +121,6 @@ def migrate_config() -> tuple[AppConfig, list[tuple[str, ServerSettings]]]:
     return config, legacy
 
 
-class LegacyTrack:
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-
-
-class LegacyEnum:
-    def __new__(cls, value=None):
-        obj = object.__new__(cls)
-        obj.value = value
-        return obj
-
-
-class LegacyObject(dict):
-    def __new__(cls, *args, **kwargs):
-        return dict.__new__(cls)
-
-    def __setstate__(self, state):
-        if isinstance(state, dict):
-            self.__dict__.update(state)
-
-
-class RestrictedUnpickler(pickle.Unpickler):
-    ALLOWED = {("collections", "deque"): deque}
-    def find_class(self, module, name):
-        if (module, name) in self.ALLOWED:
-            return self.ALLOWED[module, name]
-        if module == "bot.player.track" and name == "Track":
-            return LegacyTrack
-        if module == "bot.player.enums" and name == "TrackType":
-            return LegacyEnum
-        if module.startswith("yt_dlp."):
-            return LegacyObject
-        raise pickle.UnpicklingError(f"blocked legacy type {module}.{name}")
-
-
-def converted(item) -> Track | None:
-    source = getattr(item, "_url", "") or getattr(item, "url", "")
-    if not isinstance(source, str) or not source:
-        extra = getattr(item, "extra_info", None) or {}
-        source = extra.get("webpage_url") or extra.get("original_url") or ""
-    if not source:
-        return None
-    name = getattr(item, "_name", "") or ""
-    service = getattr(item, "service", "")
-    kind = "youtube" if service == "yt" or "youtu" in source else ("local" if Path(source).exists() else "direct")
-    return Track(source, name, kind)
-
-
-def migrate_cache(destination: Path) -> tuple[int, int]:
-    recents: list[Track] = []
-    favorites: dict[str, list[Track]] = {}
-    for cache_path in sorted(DOCUMENTS.glob("*/cache.dat")):
-        try:
-            with cache_path.open("rb") as stream:
-                data = RestrictedUnpickler(stream).load()
-        except Exception as exc:
-            print(f"Warning: could not migrate {cache_path}: {exc}")
-            continue
-        for old in data.get("recents", []):
-            if track := converted(old): recents.append(track)
-        for username, tracks in data.get("favorites", {}).items():
-            target = favorites.setdefault(username, [])
-            for old in tracks:
-                if track := converted(old): target.append(track)
-    # Preserve more than the runtime window in the migration artifact; runtime trims new additions.
-    destination.write_text(json.dumps({
-        "recents": [vars(track) for track in recents],
-        "favorites": {user: [vars(track) for track in tracks] for user, tracks in favorites.items()},
-    }, indent=2, ensure_ascii=False), encoding="utf-8")
-    return len(recents), sum(map(len, favorites.values()))
-
-
 def main() -> int:
     config, legacy = migrate_config()
     write_config(DESTINATION, config)
@@ -212,9 +137,7 @@ def main() -> int:
     with DESTINATION.open("w", encoding="utf-8") as stream:
         parser.write(stream)
     DESTINATION.chmod(0o600)
-    recents, favorites = migrate_cache(DESTINATION.parent / config.media.cache_file)
     print(f"Migrated {len(config.servers)} unique TeamTalk connections and preserved {len(legacy)} alternate accounts.")
-    print(f"Migrated {recents} recent entries and {favorites} favorite entries.")
     return 0
 
 

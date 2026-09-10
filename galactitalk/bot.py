@@ -15,7 +15,7 @@ from teamtalk_sdk import load_teamtalk_sdk
 
 from .config import AppConfig, ServerSettings
 from .media_transport import PulseAudioMediaPlayer
-from .services import MediaCache, OpenAIService, StarPool, Track, YouTubeService
+from .services import OpenAIService, StarPool, Track, YouTubeService
 
 
 tt = load_teamtalk_sdk()
@@ -51,8 +51,6 @@ COMMAND_HELP = {
     "v": "Usage: v [VOLUME]. Shows the media volume when omitted, or sets per-stream gain between 0 and the configured maximum.",
     "sp": "Usage: sp [SPEED]. Shows playback speed when omitted, or changes the active MPV playback speed from 0.25 through 4.",
     "m": "Usage: m [MODE]. Shows or selects media mode: st single, rt repeat track, tl list, rtl repeating list, or rnd random.",
-    "f": "Usage: f, f +, f -NUMBER, or f NUMBER. Lists favorites; adds the current track; deletes a favorite; or plays a favorite. Requires an authenticated username.",
-    "r": "Usage: r [NUMBER]. Lists migrated/recent media tracks, or plays the selected recent entry.",
     "gl": "Usage: gl. Returns the original link or path for the current media track.",
     "dl": "Usage: dl. Downloads the current non-live track and uploads it to the TeamTalk channel when the bot account has upload rights.",
     "sv": "Usage: sv. Shows the active searchable media service. GalactiTalk intentionally provides only yt (YouTube/yt-dlp).",
@@ -62,7 +60,7 @@ HELP_OVERVIEW = (
     "GalactiTalk commands (no leading slash):\n"
     "Core: help, gpt, say, clear, clear-all, status, restart, quit\n"
     "STAR: voices, voice, rate, pitch, preview, current, stop\n"
-    "Media: a, p, u, s, b, n, c, sb, sf, v, sp, m, f, r, gl, dl, sv\n"
+    "Media: a, p, u, s, b, n, c, sb, sf, v, sp, m, gl, dl, sv\n"
     "Send help COMMAND for detailed usage. Plain text that does not begin with a command is ignored."
 )
 
@@ -82,11 +80,11 @@ class Connection(tt.TeamTalk, threading.Thread):
 
     def __init__(self, server: ServerSettings, config: AppConfig,
                  ai: OpenAIService | None, star: StarPool, youtube: YouTubeService,
-                 cache: MediaCache, control: RuntimeControl):
+                 control: RuntimeControl):
         tt.TeamTalk.__init__(self)
         threading.Thread.__init__(self, name=f"teamtalk:{server.name}", daemon=True)
         self.server, self.config = server, config
-        self.ai, self.star, self.youtube, self.cache, self.control = ai, star, youtube, cache, control
+        self.ai, self.star, self.youtube, self.control = ai, star, youtube, control
         self.stop_event = threading.Event()
         self.actions: queue.Queue[Callable[[], None]] = queue.Queue()
         self.parts: dict[tuple[int, int, int, int], list] = {}
@@ -477,7 +475,7 @@ class Connection(tt.TeamTalk, threading.Thread):
 
     @staticmethod
     def _media_commands() -> set[str]:
-        return {"a", "p", "u", "sv", "s", "b", "n", "c", "sb", "sf", "v", "sp", "f", "m", "gl", "dl", "r"}
+        return {"a", "p", "u", "sv", "s", "b", "n", "c", "sb", "sf", "v", "sp", "m", "gl", "dl"}
 
     def _media_command(self, user_id: int, text: str, admin: bool, silent: bool = False) -> None:
         command, _, arg = text.strip().partition(" ")
@@ -535,8 +533,6 @@ class Connection(tt.TeamTalk, threading.Thread):
             if not arg: reply(f"Current mode: {self.mode} ({MODES[self.mode]}). Available: " + ", ".join(f"{k}={v}" for k,v in MODES.items()))
             elif arg.casefold() in MODES: self.mode = arg.casefold(); reply(f"Current mode: {MODES[self.mode]}.")
             else: reply("Unknown mode.")
-        elif command == "f": self._favorites(user_id, arg, reply)
-        elif command == "r": self._recents(arg, reply)
         elif command == "gl": reply(self.current_track.source if self.current_track else "Nothing is playing.")
         elif command == "dl": self._upload_current(user_id, reply)
         elif command == "sv": reply("Current service: yt\nAvailable: yt (YouTube and supported yt-dlp sites)")
@@ -589,10 +585,6 @@ class Connection(tt.TeamTalk, threading.Thread):
             self._prepare_failed(token, str(exc))
             return
         self.state = "playing"
-        if self.current_track:
-            self.cache.recents.append(Track(**vars(self.current_track)))
-            self.cache.recents = self.cache.recents[-100:]
-            self.cache.save()
 
     def _prepare_failed(self, token: int, error: str) -> None:
         if token != self.play_token: return
@@ -671,30 +663,6 @@ class Connection(tt.TeamTalk, threading.Thread):
         except Exception: pass
         if self.current_temp: self.current_temp.cleanup(); self.current_temp = None
         self._clear_star()
-
-    def _favorites(self, user_id: int, arg: str, reply: Callable[[str], None]) -> None:
-        username = self._username(user_id)
-        if not username: reply("Favorites are unavailable to guest users."); return
-        items = self.cache.favorites.setdefault(username, [])
-        if arg.startswith("+"):
-            if not self.current_track: reply("Nothing is playing."); return
-            items.append(Track(**vars(self.current_track))); self.cache.save(); reply("Added.")
-        elif arg.startswith("-"):
-            try:
-                index = int(arg[1:])-1 if arg[1:] else items.index(self.current_track)
-                items.pop(index); self.cache.save(); reply("Deleted.")
-            except (ValueError, IndexError): reply("Track is not in favorites.")
-        elif arg:
-            try: self.tracks = items; self._play_index(int(arg)-1)
-            except (ValueError, IndexError): reply("Track number is out of range.")
-        else: reply("\n".join(f"{i+1}: {t.name or t.source}" for i,t in enumerate(items)) or "The list is empty.")
-
-    def _recents(self, arg: str, reply: Callable[[str], None]) -> None:
-        items = list(reversed(self.cache.recents))
-        if arg:
-            try: self.tracks = items; self._play_index(int(arg)-1)
-            except (ValueError, IndexError): reply("Track number is out of range.")
-        else: reply("\n".join(f"{i+1}: {t.name or t.source}" for i,t in enumerate(items)) or "The list is empty.")
 
     def _upload_current(self, user_id: int, reply: Callable[[str], None]) -> None:
         if not self.current_track: reply("Nothing is playing."); return

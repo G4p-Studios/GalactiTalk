@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
@@ -266,33 +266,6 @@ class Track:
     name: str = ""
     kind: str = "youtube"
     is_live: bool = False
-
-    @classmethod
-    def from_dict(cls, value: dict) -> "Track":
-        return cls(value.get("source", ""), value.get("name", ""), value.get("kind", "youtube"), bool(value.get("is_live")))
-
-
-class MediaCache:
-    def __init__(self, path: Path):
-        self.path = path
-        self.lock = threading.Lock()
-        self.recents: list[Track] = []
-        self.favorites: dict[str, list[Track]] = {}
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            self.recents = [Track.from_dict(item) for item in data.get("recents", [])][-100:]
-            self.favorites = {user: [Track.from_dict(item) for item in tracks] for user, tracks in data.get("favorites", {}).items()}
-        except (OSError, ValueError, TypeError):
-            pass
-
-    def save(self) -> None:
-        with self.lock:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            temp = self.path.with_suffix(self.path.suffix + ".tmp")
-            temp.write_text(json.dumps({"recents": [asdict(t) for t in self.recents[-100:]],
-                                        "favorites": {u: [asdict(t) for t in v] for u, v in self.favorites.items()}}, indent=2), encoding="utf-8")
-            temp.replace(self.path)
-
 
 class YouTubeService:
     def __init__(self, settings: MediaSettings):

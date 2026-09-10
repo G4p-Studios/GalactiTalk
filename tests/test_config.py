@@ -27,10 +27,11 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(any("Duplicate" in error for error in errors))
         self.assertTrue(any("invalid port" in error for error in errors))
 
-    def test_retired_media_moderation_options_are_removed(self):
+    def test_retired_media_options_are_removed(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.ini"
             path.write_text(
+                "[media]\ncache_file=old.json\n"
                 "[server:one]\nhost=x\nbanned_users=one\nblocked_media_commands=p, u\nadmins=core-admin\n",
                 encoding="utf-8",
             )
@@ -39,6 +40,7 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("banned_users", text)
         self.assertNotIn("blocked_media_commands", text)
         self.assertNotIn("admins", text)
+        self.assertNotIn("cache_file", text)
 
 
 if __name__ == "__main__":

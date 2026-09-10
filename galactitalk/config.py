@@ -93,7 +93,6 @@ class MediaSettings:
     default_mode: str = "tl"
     search_results: int = 300
     cookiefile_path: str = ""
-    cache_file: str = "galactitalk-cache.json"
     delete_uploaded_files_after: int = 300
     send_channel_messages: bool = True
     temp_dir: str = ""
@@ -176,7 +175,6 @@ def read_config(path: Path) -> AppConfig:
             default_mode=media.get("default_mode", "tl").strip().casefold(),
             search_results=int(media.get("search_results", 300)),
             cookiefile_path=media.get("youtube_cookiefile", media.get("cookiefile_path", "")).strip(),
-            cache_file=media.get("cache_file", "galactitalk-cache.json").strip(),
             delete_uploaded_files_after=int(media.get("delete_uploaded_files_after", 300)),
             send_channel_messages=parse_bool(media.get("send_channel_messages"), True),
             temp_dir=media.get("temp_dir", "").strip(),
@@ -225,7 +223,6 @@ def write_config(path: Path, config: AppConfig) -> None:
         "default_volume": str(config.media.default_volume), "max_volume": str(config.media.max_volume),
         "seek_step": str(config.media.seek_step), "default_mode": config.media.default_mode,
         "search_results": str(config.media.search_results), "youtube_cookiefile": config.media.cookiefile_path,
-        "cache_file": config.media.cache_file,
         "delete_uploaded_files_after": str(config.media.delete_uploaded_files_after),
         "send_channel_messages": "yes" if config.media.send_channel_messages else "no",
         "temp_dir": config.media.temp_dir,
@@ -314,7 +311,7 @@ def configure(path: Path) -> None:
         max_volume=prompt_int("Maximum media volume", old.media.max_volume, 1),
         seek_step=prompt_int("Default seek step in seconds", old.media.seek_step, 1), default_mode=old.media.default_mode,
         search_results=prompt_int("Maximum YouTube search results", old.media.search_results, 1),
-        cookiefile_path=prompt("YouTube cookie file path", old.media.cookiefile_path), cache_file=old.media.cache_file,
+        cookiefile_path=prompt("YouTube cookie file path", old.media.cookiefile_path),
         delete_uploaded_files_after=prompt_int("Delete uploaded files after seconds (0 keeps them)", old.media.delete_uploaded_files_after, 0),
         send_channel_messages=prompt_bool("Announce media requests in the channel", old.media.send_channel_messages),
         temp_dir=prompt("Media temporary directory (blank for system default)", old.media.temp_dir),
@@ -354,6 +351,8 @@ def remove_deprecated_media_controls(path: Path) -> bool:
     parser = configparser.ConfigParser(interpolation=None)
     parser.read(path, encoding="utf-8")
     changed = False
+    if parser.has_section("media") and parser.remove_option("media", "cache_file"):
+        changed = True
     for section in parser.sections():
         if not section.casefold().startswith("server:"):
             continue

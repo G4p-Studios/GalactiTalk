@@ -9,7 +9,7 @@ import sys
 
 from .bot import Connection, RuntimeControl, tt
 from .config import configure, read_config, remove_deprecated_media_controls, validate_config
-from .services import MediaCache, OpenAIService, StarPool, YouTubeService
+from .services import OpenAIService, StarPool, YouTubeService
 
 
 EXIT_RESTART = 75
@@ -37,14 +37,10 @@ def run(config_path: Path) -> int:
         ai = None
     star = StarPool(config.star)
     youtube = YouTubeService(config.media)
-    cache_path = Path(config.media.cache_file).expanduser()
-    if not cache_path.is_absolute():
-        cache_path = config_path.parent / cache_path
-    cache = MediaCache(cache_path)
     control = RuntimeControl()
     previous_sigterm = signal.getsignal(signal.SIGTERM)
     signal.signal(signal.SIGTERM, lambda _signum, _frame: control.request_stop())
-    connections = [Connection(server, config, ai, star, youtube, cache, control)
+    connections = [Connection(server, config, ai, star, youtube, control)
                    for server in config.servers if server.enabled]
     if not connections:
         print("All TeamTalk server sections are disabled.")

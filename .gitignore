@@ -2,5 +2,4 @@ __pycache__/
 *.py[cod]
 .venv/
 config.ini
-galactitalk-cache.json
 *.log

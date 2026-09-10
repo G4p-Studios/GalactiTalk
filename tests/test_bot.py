@@ -62,6 +62,7 @@ class RoutingTests(unittest.TestCase):
         }
         self.assertEqual(set(COMMAND_HELP), expected)
         self.assertNotIn("h", COMMAND_HELP)
+        self.assertTrue({"f", "r", "cc"}.isdisjoint(COMMAND_HELP))
         self.assertTrue(all(text.startswith("Usage:") for text in COMMAND_HELP.values()))
 
     def test_star_completion_releases_stream_for_queue(self):
