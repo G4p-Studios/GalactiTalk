@@ -11,7 +11,7 @@ server/channel connections; duplicate old bot accounts are retained as disabled
 
 ## Install and run
 
-Python 3.10 or newer and FFmpeg are required. Create an environment and run:
+Python 3.11 or newer and FFmpeg are recommended. Create an environment and run:
 
 ```bash
 cd ~/golactitalk

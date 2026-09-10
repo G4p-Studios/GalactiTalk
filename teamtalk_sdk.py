@@ -183,9 +183,6 @@ def _try_existing() -> tuple[ModuleType | None, Exception | None]:
     if configured := os.environ.get(SDK_DIR_ENV):
         roots.append(Path(configured).expanduser())
     roots.append(_default_data_dir() / "teamtalk-sdk")
-    # Reuse either predecessor's user-local SDK without retaining their bot source.
-    legacy = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    roots += [legacy / "tt-star" / "teamtalk-sdk", legacy / "tt-chatgpt" / "teamtalk-sdk"]
     for root in roots:
         if wrapper := _find_wrapper(root):
             try:
