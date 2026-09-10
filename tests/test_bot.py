@@ -80,6 +80,30 @@ class RoutingTests(unittest.TestCase):
             self.assertFalse(path.exists())
             self.assertEqual(started, [True])
 
+    def test_media_status_uses_name_url_pause_and_default(self):
+        changes = []
+        connection = SimpleNamespace(
+            server=SimpleNamespace(status="Default", gender="f"),
+            current_track=SimpleNamespace(name="A song", source="https://example.test/audio"),
+            state="playing",
+            doChangeStatus=lambda mode, text: changes.append(
+                (mode, text.decode() if isinstance(text, bytes) else str(text))),
+        )
+        Connection._update_status(connection)
+        connection.current_track.name = ""
+        Connection._update_status(connection)
+        connection.state = "paused"
+        Connection._update_status(connection)
+        connection.current_track = None
+        connection.state = "stopped"
+        Connection._update_status(connection)
+        self.assertEqual(changes, [
+            (256, "Playing: A song"),
+            (256, "Playing: https://example.test/audio"),
+            (256, "Paused: https://example.test/audio"),
+            (256, "Default"),
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()

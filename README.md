@@ -98,7 +98,9 @@ Media commands are private messages and keep the original TTMediaBot compact
 names. YouTube is the only searchable media service. Searches use the original
 lightweight search path, and playback resolves an audio stream URL for MPV
 instead of downloading the complete file first. Direct URLs and admin-only local
-files/directories are accepted by `u`.
+files/directories are accepted by `u`. While media is active, the TeamTalk status
+shows `Playing: NAME` or `Paused: NAME`, follows changing stream metadata, and
+returns to the configured server status when playback stops.
 
 - `a` about; `p QUERY` search/play; bare `p` pause/resume.
 - `u URL`, `s`, `b`, `n`, `c NUMBER` — URL, stop, previous, next, selection.

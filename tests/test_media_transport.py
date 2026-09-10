@@ -7,6 +7,15 @@ from galactitalk.media_transport import PulseAudioMediaPlayer
 
 
 class MediaTransportTests(unittest.TestCase):
+    def test_metadata_title_matches_original_ttmediabot_order(self):
+        title = PulseAudioMediaPlayer._metadata_title(
+            {"icy-name": "Station &amp; Co", "icy-title": "Song", "icy-artist": "Artist"},
+            "Fallback",
+        )
+        self.assertEqual(title, "Artist - Song - Station & Co")
+        self.assertEqual(PulseAudioMediaPlayer._metadata_title({}, "Fallback &amp; More"),
+                         "Fallback & More")
+
     def test_playback_creates_and_removes_an_isolated_route(self):
         device = SimpleNamespace(szDeviceName="temporary.monitor", szDeviceID="", nMaxInputChannels=2,
                                  nDeviceID=17)

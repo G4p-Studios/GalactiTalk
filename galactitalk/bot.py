@@ -117,6 +117,8 @@ class Connection(tt.TeamTalk, threading.Thread):
             self, tt, server.name,
             lambda token, code, error: self.actions.put(
                 lambda token=token, code=code, error=error: self._media_exited(token, code, error)),
+            lambda token, title: self.actions.put(
+                lambda token=token, title=title: self._media_metadata(token, title)),
         )
 
     @staticmethod
@@ -177,7 +179,7 @@ class Connection(tt.TeamTalk, threading.Thread):
     def onCmdMyselfLoggedIn(self, user_id, account):
         self.my_id = user_id
         print(f"{self.server.name}: logged in as user {user_id}")
-        self.doChangeStatus(GENDERS.get(self.server.gender, 4096), tt.ttstr(self.server.status))
+        self._update_status()
         self._join(self.server.channel, self.server.channel_password)
 
     def onCmdMyselfLoggedOut(self):
@@ -585,6 +587,7 @@ class Connection(tt.TeamTalk, threading.Thread):
             self._prepare_failed(token, str(exc))
             return
         self.state = "playing"
+        self._update_status()
 
     def _prepare_failed(self, token: int, error: str) -> None:
         if token != self.play_token: return
@@ -593,6 +596,7 @@ class Connection(tt.TeamTalk, threading.Thread):
             self.current_temp.cleanup()
             self.current_temp = None
         self.preparing, self.state, self.current_track = False, "stopped", None
+        self._update_status()
         print(f"{self.server.name}: media preparation failed: {error}")
         if self.media_requester:
             self._send_private(self.media_requester, f"Media could not be played: {error}")
@@ -606,6 +610,7 @@ class Connection(tt.TeamTalk, threading.Thread):
         elif paused is not None:
             if self.media_player.pause(paused):
                 self.state = "paused" if paused else "playing"
+                self._update_status()
         else:
             self.media_player.set_volume(self.volume)
 
@@ -621,6 +626,8 @@ class Connection(tt.TeamTalk, threading.Thread):
         self.state = "stopped"
         if returncode == 0 and self.current_track is not None:
             self._advance_after_finish()
+            if self.state == "stopped":
+                self._update_status()
         else:
             if returncode:
                 detail = f": {error}" if error else ""
@@ -629,7 +636,24 @@ class Connection(tt.TeamTalk, threading.Thread):
                     self._send_private(self.media_requester, "Media playback failed. The failure was recorded in the GalactiTalk log.")
             self.current_track = None
             self.media_requester = 0
+            self._update_status()
             self._start_waiting_stream()
+
+    def _media_metadata(self, token: int, title: str) -> None:
+        if token != self.play_token or not self.current_track or self.state == "stopped":
+            return
+        if self.current_track.kind not in {"direct", "local"}:
+            return
+        if title != self.current_track.name:
+            self.current_track.name = title
+            self._update_status()
+
+    def _update_status(self) -> None:
+        text = self.server.status
+        if self.current_track and self.state in {"playing", "paused"}:
+            prefix = "Paused" if self.state == "paused" else "Playing"
+            text = f"{prefix}: {self.current_track.name or self.current_track.source}"
+        self.doChangeStatus(GENDERS.get(self.server.gender, 4096), tt.ttstr(text[:256]))
 
     def _step(self, delta: int, reply: Callable[[str], None]) -> None:
         if not self.tracks: reply("Nothing is playing."); return
@@ -654,11 +678,15 @@ class Connection(tt.TeamTalk, threading.Thread):
         self.media_player.stop()
         if self.current_temp: self.current_temp.cleanup(); self.current_temp = None
         self.current_source = None
+        self._update_status()
         self._start_waiting_stream()
 
     def _stop_all(self) -> None:
         self.play_token += 1
         self.media_player.stop()
+        self.current_track = None
+        self.state = "stopped"
+        self._update_status()
         try: self.stopStreamingMediaFileToChannel()
         except Exception: pass
         if self.current_temp: self.current_temp.cleanup(); self.current_temp = None
