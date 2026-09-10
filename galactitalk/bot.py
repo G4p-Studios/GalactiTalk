@@ -192,6 +192,7 @@ class Connection(tt.TeamTalk, threading.Thread):
         if self.star_current:
             path, user_id, _ = self.star_current
             self.star_current = None
+            self.state = "stopped"
             path.unlink(missing_ok=True)
             if status == tt.MediaFileStatus.MFS_ERROR:
                 self._send_private(user_id, "STAR audio streaming failed.")

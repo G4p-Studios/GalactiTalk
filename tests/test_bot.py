@@ -1,4 +1,6 @@
 from types import SimpleNamespace
+from pathlib import Path
+import tempfile
 import unittest
 
 from galactitalk.bot import Connection, tt
@@ -25,6 +27,23 @@ class RoutingTests(unittest.TestCase):
         playback = Connection._playback(connection, False, 0)
         self.assertEqual(playback.audioPreprocessor.nPreprocessor, tt.AudioPreprocessorType.TEAMTALK_AUDIOPREPROCESSOR)
         self.assertEqual(playback.audioPreprocessor.ttpreprocessor.nGainLevel, tt.SoundLevel.SOUND_GAIN_DEFAULT)
+
+    def test_star_completion_releases_stream_for_queue(self):
+        started = []
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "speech.wav"
+            path.write_bytes(b"audio")
+            connection = SimpleNamespace(
+                elapsed_ms=0, duration_ms=0, star_current=(path, 7, "voice"),
+                state="playing", current_track=None, preparing=False,
+                _send_private=lambda *_: None,
+                _start_waiting_stream=lambda: started.append(True),
+            )
+            info = SimpleNamespace(uElapsedMSec=1, uDurationMSec=1, nStatus=tt.MediaFileStatus.MFS_FINISHED)
+            Connection.onStreamMediaFile(connection, info)
+            self.assertEqual(connection.state, "stopped")
+            self.assertFalse(path.exists())
+            self.assertEqual(started, [True])
 
 
 if __name__ == "__main__":
