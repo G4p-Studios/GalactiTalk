@@ -1,4 +1,4 @@
-openai>=1.79,<3
+openai>=3.8.0,<4
 py7zr>=0.21,<2
 secretstorage>=3.3,<4; sys_platform == "linux"
 websockets>=13.1,<17
