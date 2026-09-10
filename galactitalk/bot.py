@@ -640,7 +640,7 @@ class Connection(tt.TeamTalk, threading.Thread):
             self._start_waiting_stream()
 
     def _media_metadata(self, token: int, title: str) -> None:
-        if token != self.play_token or not self.current_track or self.state == "stopped":
+        if token != self.play_token or not self.current_track or self.state != "playing":
             return
         if self.current_track.kind not in {"direct", "local"}:
             return

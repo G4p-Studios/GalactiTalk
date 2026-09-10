@@ -104,6 +104,30 @@ class RoutingTests(unittest.TestCase):
             (256, "Default"),
         ])
 
+    def test_original_metadata_updates_only_playing_direct_or_local_tracks(self):
+        changes = []
+        connection = SimpleNamespace(
+            play_token=4,
+            current_track=SimpleNamespace(
+                name="Original", source="https://example.test/live", kind="direct"),
+            state="playing",
+            _update_status=lambda: changes.append(connection.current_track.name),
+        )
+        Connection._media_metadata(connection, 4, "Artist - Song - Station")
+        self.assertEqual(connection.current_track.name, "Artist - Song - Station")
+        self.assertEqual(changes, ["Artist - Song - Station"])
+
+        connection.state = "paused"
+        Connection._media_metadata(connection, 4, "Changed while paused")
+        self.assertEqual(connection.current_track.name, "Artist - Song - Station")
+
+        connection.state = "playing"
+        connection.current_track.kind = "youtube"
+        Connection._media_metadata(connection, 4, "YouTube media title")
+        Connection._media_metadata(connection, 3, "Stale player")
+        self.assertEqual(connection.current_track.name, "Artist - Song - Station")
+        self.assertEqual(changes, ["Artist - Song - Station"])
+
 
 if __name__ == "__main__":
     unittest.main()

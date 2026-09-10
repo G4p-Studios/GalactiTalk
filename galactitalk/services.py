@@ -364,7 +364,10 @@ class YouTubeService:
         try:
             with YoutubeDL(options) as ydl:
                 info = ydl.extract_info(track.source, download=False)
-                track.name = info.get("title") or track.name
+                title = info.get("title") or track.name
+                if title and "uploader" in info:
+                    title += f" - {info['uploader']}"
+                track.name = title
                 track.is_live = bool(info.get("is_live"))
                 stream_url = info.get("url")
                 if not stream_url:

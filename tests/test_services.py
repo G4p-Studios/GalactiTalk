@@ -31,17 +31,19 @@ class YouTubeServiceTests(unittest.TestCase):
     def test_prepare_resolves_stream_without_downloading_media(self):
         ydl = Mock()
         ydl.extract_info.return_value = {
-            "title": "Resolved", "url": "https://cdn.test/audio.m4a", "is_live": False,
+            "title": "Resolved", "uploader": "The Channel",
+            "url": "https://cdn.test/audio.m4a", "is_live": False,
         }
         manager = Mock()
         manager.__enter__ = Mock(return_value=ydl)
         manager.__exit__ = Mock(return_value=False)
         with tempfile.TemporaryDirectory() as directory, \
                 patch("galactitalk.services.YoutubeDL", return_value=manager):
-            source, live = self.service.prepare(
-                Track("https://youtube.test/watch?v=1"), Path(directory))
+            track = Track("https://youtube.test/watch?v=1")
+            source, live = self.service.prepare(track, Path(directory))
         self.assertEqual(source, "https://cdn.test/audio.m4a")
         self.assertFalse(live)
+        self.assertEqual(track.name, "Resolved - The Channel")
         ydl.extract_info.assert_called_once_with("https://youtube.test/watch?v=1", download=False)
 
     def test_single_youtube_url_is_not_inspected_twice(self):

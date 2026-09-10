@@ -15,6 +15,13 @@ class MediaTransportTests(unittest.TestCase):
         self.assertEqual(title, "Artist - Song - Station & Co")
         self.assertEqual(PulseAudioMediaPlayer._metadata_title({}, "Fallback &amp; More"),
                          "Fallback & More")
+        self.assertEqual(
+            PulseAudioMediaPlayer._metadata_title(
+                {"TITLE": "Ignored", "artist": "Artist", "album-title": "Song"},
+                "Fallback",
+            ),
+            "Artist - Song",
+        )
 
     def test_playback_creates_and_removes_an_isolated_route(self):
         device = SimpleNamespace(szDeviceName="temporary.monitor", szDeviceID="", nMaxInputChannels=2,

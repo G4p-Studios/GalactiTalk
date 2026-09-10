@@ -20,7 +20,9 @@ route.
 - Creates a separate PulseAudio null sink for each active media player, routes
   it into the correct TeamTalk connection, and removes it after playback.
 - Updates TeamTalk status to `Playing: TITLE` or `Paused: TITLE`, then restores
-  the configured status when playback ends.
+  the configured status when playback ends. YouTube titles include the uploader,
+  while direct/local metadata follows TTMediaBot's `artist - title - station`
+  order.
 - Keeps all settings in one INI file and includes an interactive configuration
   wizard.
 - Creates its own virtual environment and installs missing Python, yt-dlp, MPV,

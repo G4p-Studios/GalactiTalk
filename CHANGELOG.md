@@ -5,6 +5,12 @@ All notable changes to GalactiTalk are documented here. The project follows
 
 ## [Unreleased]
 
+### Changed
+
+- Matched TTMediaBot's status metadata behavior, including YouTube uploader
+  names and live direct/local stream metadata in `artist - title - station`
+  order.
+
 ## [0.1.0] - 2026-09-10
 
 ### Added

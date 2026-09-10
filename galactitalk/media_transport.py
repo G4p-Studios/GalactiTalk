@@ -190,8 +190,8 @@ class PulseAudioMediaPlayer:
             for key, raw_value in metadata.items():
                 if raw_value is None:
                     continue
-                name = str(key).casefold()
                 value = html.unescape(str(raw_value))
+                name = str(key)
                 if name == "icy-name":
                     stream_name = value
                 if "title" in name:
