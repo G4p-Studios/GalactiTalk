@@ -7,6 +7,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -20,7 +21,7 @@ class PulseAudioMediaPlayer:
     """Route one MPV process into one temporary PulseAudio monitor source."""
 
     def __init__(self, teamtalk, tt_module, name: str,
-                 on_exit: Callable[[int, int], None]) -> None:
+                 on_exit: Callable[[int, int, str], None]) -> None:
         self.teamtalk = teamtalk
         self.tt = tt_module
         self.name = re.sub(r"[^A-Za-z0-9_]", "_", name)[:32] or "server"
@@ -90,9 +91,11 @@ class PulseAudioMediaPlayer:
             ]
             environment = os.environ.copy()
             environment["PULSE_SINK"] = self.sink_name
+            executable_dir = str(Path(sys.executable).parent)
+            environment["PATH"] = executable_dir + os.pathsep + environment.get("PATH", "")
             self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
-                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                            env=environment)
+                                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                            text=True, env=environment)
             self.teamtalk.enableVoiceTransmission(True)
             process = self.process
             threading.Thread(target=self._watch, args=(process, token),
@@ -113,8 +116,9 @@ class PulseAudioMediaPlayer:
         return None
 
     def _watch(self, process: subprocess.Popen, token: int) -> None:
-        returncode = process.wait()
-        self.on_exit(token, returncode)
+        _, errors = process.communicate()
+        error_lines = [line.strip() for line in (errors or "").splitlines() if line.strip()]
+        self.on_exit(token, process.returncode, "\n".join(error_lines[-12:]))
 
     def _request(self, command: list, *, attempts: int = 1):
         path = self.socket_path

@@ -7,6 +7,7 @@ downloading from <https://www.bearware.dk/?page_id=419>. Users are responsible
 for the required entitlement; license information is at
 <https://bearware.dk/?page_id=316>.
 
-The OpenAI Python library/API, yt-dlp, FFmpeg, py7zr, and websockets are separate
-third-party projects under their own licenses and terms. Users provide their own
-OpenAI credentials. GalactiTalk is not endorsed by OpenAI or BearWare.dk.
+The OpenAI Python library/API, yt-dlp, youtube-search-python, MPV, py7zr, and
+websockets are separate third-party projects under their own licenses and terms.
+Users provide their own OpenAI credentials. GalactiTalk is not endorsed by
+OpenAI or BearWare.dk.

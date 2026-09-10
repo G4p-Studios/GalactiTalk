@@ -35,7 +35,6 @@ def safe_name(text: str) -> str:
 
 def server_from_media(name: str, data: dict) -> ServerSettings:
     team = data["teamtalk"]
-    users = team.get("users", {})
     return ServerSettings(
         name=safe_name(name), host=team.get("hostname", ""), tcp_port=int(team.get("tcp_port", 10333)),
         udp_port=int(team.get("udp_port", team.get("tcp_port", 10333))), encrypted=bool(team.get("encrypted")),
@@ -43,8 +42,6 @@ def server_from_media(name: str, data: dict) -> ServerSettings:
         username=team.get("username", ""), password=team.get("password", ""),
         channel=str(team.get("channel", "/")), channel_password=team.get("channel_password", ""),
         status=team.get("status", ""), gender=team.get("gender", "n"),
-        admins=list(users.get("admins", [])), banned_users=list(users.get("banned_users", [])),
-        blocked_media_commands=list(data.get("general", {}).get("blocked_commands", [])),
         start_commands=list(data.get("general", {}).get("start_commands", [])),
     )
 

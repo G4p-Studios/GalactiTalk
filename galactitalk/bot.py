@@ -9,10 +9,11 @@ import tempfile
 import threading
 import traceback
 from typing import Callable
+from urllib.parse import urlparse
 
 from teamtalk_sdk import load_teamtalk_sdk
 
-from .config import AppConfig, ServerSettings, write_config
+from .config import AppConfig, ServerSettings
 from .media_transport import PulseAudioMediaPlayer
 from .services import MediaCache, OpenAIService, StarPool, Track, YouTubeService
 
@@ -55,23 +56,6 @@ COMMAND_HELP = {
     "gl": "Usage: gl. Returns the original link or path for the current media track.",
     "dl": "Usage: dl. Downloads the current non-live track and uploads it to the TeamTalk channel when the bot account has upload rights.",
     "sv": "Usage: sv. Shows the active searchable media service. GalactiTalk intentionally provides only yt (YouTube/yt-dlp).",
-    "bc": "Usage: bc, bc +COMMAND, or bc -COMMAND. Administrator-only. Lists, blocks, or unblocks media commands for regular users.",
-    "cg": "Usage: cg n|m|f. Administrator-only. Changes the bot gender/status-mode flag on this server.",
-    "cl": "Usage: cl [LANGUAGE]. Administrator-only. Shows language support; built-in GalactiTalk messages currently use English.",
-    "cn": "Usage: cn NICKNAME. Administrator-only. Changes the live nickname for this server. ChatGPT channel prompts always use @chatgpt.",
-    "cs": "Usage: cs [STATUS]. Administrator-only. Changes or clears the bot's TeamTalk status message.",
-    "cc": "Usage: cc. Administrator-only. Clears all shared media recents and favorites from the cache.",
-    "cm": "Usage: cm. Administrator-only. Toggles media-request announcements in TeamTalk channels.",
-    "jc": "Usage: jc CHANNEL [| PASSWORD]. Administrator-only. Joins a channel by path or numeric ID, optionally using a password after |.",
-    "l": "Usage: l. Administrator-only. Locks or unlocks media commands for regular users on this server.",
-    "ua": "Usage: ua, ua +USERNAME, or ua -USERNAME. Administrator-only. Lists or edits configured additional administrators.",
-    "ub": "Usage: ub, ub +USERNAME, or ub -USERNAME. Administrator-only. Lists or edits banned usernames.",
-    "eh": "Usage: eh. Administrator-only. Reports the built-in event handling state; connection and playback events are always enabled.",
-    "sc": "Usage: sc. Administrator-only. Saves runtime nickname, status, access-list, and toggle changes to config.ini.",
-    "va": "Usage: va. Administrator-only. Reports automatic MPV/PulseAudio media-routing state. Each playback gets a private temporary sink and TeamTalk monitor input.",
-    "rs": "Usage: rs. Administrator-only media-compatible alias for restart.",
-    "q": "Usage: q. Administrator-only media-compatible alias for quit.",
-    "gcid": "Usage: gcid. Administrator-only. Returns the numeric ID of the bot's current TeamTalk channel.",
 }
 
 HELP_OVERVIEW = (
@@ -79,7 +63,6 @@ HELP_OVERVIEW = (
     "Core: help, gpt, say, clear, clear-all, status, restart, quit\n"
     "STAR: voices, voice, rate, pitch, preview, current, stop\n"
     "Media: a, p, u, s, b, n, c, sb, sf, v, sp, m, f, r, gl, dl, sv\n"
-    "Media administration: bc, cg, cl, cn, cs, cc, cm, jc, l, ua, ub, eh, sc, va, rs, q, gcid\n"
     "Send help COMMAND for detailed usage. Plain text that does not begin with a command is ignored."
 )
 
@@ -97,12 +80,12 @@ class RuntimeControl:
 class Connection(tt.TeamTalk, threading.Thread):
     """One independent TeamTalk connection with an isolated media route."""
 
-    def __init__(self, server: ServerSettings, config: AppConfig, config_path: Path,
+    def __init__(self, server: ServerSettings, config: AppConfig,
                  ai: OpenAIService | None, star: StarPool, youtube: YouTubeService,
                  cache: MediaCache, control: RuntimeControl):
         tt.TeamTalk.__init__(self)
         threading.Thread.__init__(self, name=f"teamtalk:{server.name}", daemon=True)
-        self.server, self.config, self.config_path = server, config, config_path
+        self.server, self.config = server, config
         self.ai, self.star, self.youtube, self.cache, self.control = ai, star, youtube, cache, control
         self.stop_event = threading.Event()
         self.actions: queue.Queue[Callable[[], None]] = queue.Queue()
@@ -129,13 +112,13 @@ class Connection(tt.TeamTalk, threading.Thread):
         self.duration_ms = 0
         self.preparing = False
         self.play_token = 0
+        self.media_requester = 0
         self.star_queue: queue.Queue[tuple[Path, int, str]] = queue.Queue()
         self.star_current: tuple[Path, int, str] | None = None
-        self.locked = False
         self.media_player = PulseAudioMediaPlayer(
             self, tt, server.name,
-            lambda token, code: self.actions.put(
-                lambda token=token, code=code: self._media_exited(token, code)),
+            lambda token, code, error: self.actions.put(
+                lambda token=token, code=code, error=error: self._media_exited(token, code, error)),
         )
 
     @staticmethod
@@ -282,10 +265,7 @@ class Connection(tt.TeamTalk, threading.Thread):
         if user_id == 0:
             return True
         user = self._user(user_id)
-        return bool(user.uUserType & tt.UserType.USERTYPE_ADMIN) or self._username(user_id).casefold() in {x.casefold() for x in self.server.admins}
-
-    def _is_banned(self, user_id: int) -> bool:
-        return self._username(user_id).casefold() in {x.casefold() for x in self.server.banned_users}
+        return bool(user.uUserType & tt.UserType.USERTYPE_ADMIN)
 
     def _same_channel(self, user_id: int) -> bool:
         return bool(self.channel_id and self._user(user_id).nChannelID == self.channel_id)
@@ -312,9 +292,6 @@ class Connection(tt.TeamTalk, threading.Thread):
 
     def _handle_private(self, user_id: int, text: str) -> None:
         if not text:
-            return
-        if self._is_banned(user_id):
-            self._send_private(user_id, "You are banned from using this bot.")
             return
         command, _, rest = text.partition(" ")
         command = command.casefold()
@@ -500,20 +477,14 @@ class Connection(tt.TeamTalk, threading.Thread):
 
     @staticmethod
     def _media_commands() -> set[str]:
-        return {"a", "p", "u", "sv", "s", "b", "n", "c", "sb", "sf", "v", "sp", "f", "m", "gl", "dl", "r",
-                "cg", "cl", "cn", "cs", "cc", "cm", "jc", "bc", "l", "ua", "ub", "eh", "sc", "va", "rs", "q", "gcid"}
+        return {"a", "p", "u", "sv", "s", "b", "n", "c", "sb", "sf", "v", "sp", "f", "m", "gl", "dl", "r"}
 
     def _media_command(self, user_id: int, text: str, admin: bool, silent: bool = False) -> None:
         command, _, arg = text.strip().partition(" ")
         command = command.casefold()
         reply = lambda value: None if silent else self._send_private(user_id, value)
-        if not admin and (not self._same_channel(user_id) or self.locked):
-            reply("You must be in the bot's channel, and the bot must be unlocked."); return
-        if not admin and command in {x.casefold() for x in self.server.blocked_media_commands}:
-            reply("This media command is blocked."); return
-        admin_commands = {"cg", "cl", "cn", "cs", "cc", "cm", "jc", "bc", "l", "ua", "ub", "eh", "sc", "va", "rs", "q", "gcid"}
-        if command in admin_commands and not admin:
-            reply("This command is restricted to administrators."); return
+        if not admin and not self._same_channel(user_id):
+            reply("You must be in the bot's channel."); return
         if command == "a": reply("GalactiTalk: TeamTalk media, STAR speech, and ChatGPT in one multi-server client.")
         elif command == "p":
             if arg:
@@ -525,6 +496,8 @@ class Connection(tt.TeamTalk, threading.Thread):
         elif command == "u":
             if not arg: reply("Usage: u URL")
             elif Path(arg).expanduser().exists() and not admin: reply("Local paths are restricted to administrators.")
+            elif not Path(arg).expanduser().exists() and urlparse(arg).scheme.casefold() not in {"http", "https", "rtmp", "rtsp"}:
+                reply("Use an http, https, rtmp, or rtsp URL." if not admin else "The local path cannot be found.")
             else:
                 reply("Loading URL...")
                 self.youtube.submit_url(arg, lambda error, tracks: self.actions.put(lambda: self._media_results(user_id, error, tracks, arg)))
@@ -567,33 +540,12 @@ class Connection(tt.TeamTalk, threading.Thread):
         elif command == "gl": reply(self.current_track.source if self.current_track else "Nothing is playing.")
         elif command == "dl": self._upload_current(user_id, reply)
         elif command == "sv": reply("Current service: yt\nAvailable: yt (YouTube and supported yt-dlp sites)")
-        elif command == "bc": self._edit_list(self.server.blocked_media_commands, arg, reply)
-        elif command == "ua": self._edit_list(self.server.admins, arg, reply)
-        elif command == "ub": self._edit_list(self.server.banned_users, arg, reply)
-        elif command == "cg":
-            if arg.casefold() not in GENDERS: reply("Gender must be n, m, or f.")
-            else: self.server.gender = arg.casefold(); self.doChangeStatus(GENDERS[self.server.gender], tt.ttstr(self.server.status))
-        elif command == "cl": reply("Current language: en. GalactiTalk's built-in messages are English.")
-        elif command == "cn":
-            if arg: self.server.nickname = arg; self.doChangeNickname(tt.ttstr(arg))
-            else: reply("Usage: cn NICKNAME")
-        elif command == "cs": self.server.status = arg; self.doChangeStatus(GENDERS.get(self.server.gender,4096), tt.ttstr(arg))
-        elif command == "cc": self.cache.recents.clear(); self.cache.favorites.clear(); self.cache.save(); reply("Cache cleared.")
-        elif command == "cm": self.config.media.send_channel_messages = not self.config.media.send_channel_messages; reply(f"Channel messages {'enabled' if self.config.media.send_channel_messages else 'disabled'}.")
-        elif command == "jc":
-            channel, sep, password = arg.partition("|")
-            self._join(channel.strip() or self.server.channel, password.strip() if sep else "")
-        elif command == "l": self.locked = not self.locked; reply("Locked." if self.locked else "Unlocked.")
-        elif command == "eh": reply("Event handling is built in and enabled for every connection.")
-        elif command == "sc": write_config(self.config_path, self.config); reply("Configuration saved.")
-        elif command == "va": reply("Automatic media routing is enabled: each MPV playback owns a temporary PulseAudio sink and monitor source, which are removed when playback stops.")
-        elif command == "gcid": reply(str(self.channel_id))
-        elif command in {"rs", "q"}: self.control.request_stop(command == "rs")
 
     def _media_results(self, user_id: int, error: str | None, tracks: list[Track] | None, request: str) -> None:
         if error or not tracks:
             self._send_private(user_id, f"Nothing found: {error or request}"); return
         self.tracks = tracks
+        self.media_requester = user_id
         if self.config.media.send_channel_messages and self.channel_id:
             self._send_channel(self.channel_id, f"{self._display(user_id)} requested {request}")
         self._play_index(0)
@@ -650,6 +602,8 @@ class Connection(tt.TeamTalk, threading.Thread):
             self.current_temp = None
         self.preparing, self.state, self.current_track = False, "stopped", None
         print(f"{self.server.name}: media preparation failed: {error}")
+        if self.media_requester:
+            self._send_private(self.media_requester, f"Media could not be played: {error}")
         self._start_waiting_stream()
 
     def _update_playback(self, paused: bool | None = None,
@@ -663,7 +617,7 @@ class Connection(tt.TeamTalk, threading.Thread):
         else:
             self.media_player.set_volume(self.volume)
 
-    def _media_exited(self, token: int, returncode: int) -> None:
+    def _media_exited(self, token: int, returncode: int, error: str = "") -> None:
         if token != self.play_token:
             return
         self.media_player.stop()
@@ -677,8 +631,12 @@ class Connection(tt.TeamTalk, threading.Thread):
             self._advance_after_finish()
         else:
             if returncode:
-                print(f"{self.server.name}: MPV media playback failed with exit status {returncode}")
+                detail = f": {error}" if error else ""
+                print(f"{self.server.name}: MPV media playback failed with exit status {returncode}{detail}")
+                if self.media_requester:
+                    self._send_private(self.media_requester, "Media playback failed. The failure was recorded in the GalactiTalk log.")
             self.current_track = None
+            self.media_requester = 0
             self._start_waiting_stream()
 
     def _step(self, delta: int, reply: Callable[[str], None]) -> None:
@@ -700,6 +658,7 @@ class Connection(tt.TeamTalk, threading.Thread):
 
     def _stop_media(self) -> None:
         self.play_token += 1; self.preparing = False; self.current_track = None; self.state = "stopped"
+        self.media_requester = 0
         self.media_player.stop()
         if self.current_temp: self.current_temp.cleanup(); self.current_temp = None
         self.current_source = None
@@ -746,8 +705,8 @@ class Connection(tt.TeamTalk, threading.Thread):
         def prepare_upload():
             temp = tempfile.TemporaryDirectory(prefix="galactitalk-upload-")
             try:
-                source, live = self.youtube.prepare(track, Path(temp.name))
-                if live or not isinstance(source, Path): raise RuntimeError("Live streams cannot be uploaded")
+                source, live = self.youtube.download(track, Path(temp.name))
+                if live: raise RuntimeError("Live streams cannot be uploaded")
                 persistent = Path(temp.name) / source.name
                 self.actions.put(lambda: (self.doSendFile(self.channel_id, tt.ttstr(str(persistent))), reply("Uploading...")))
                 # Kept until TeamTalk has opened the file; cleanup is delayed.
@@ -757,17 +716,6 @@ class Connection(tt.TeamTalk, threading.Thread):
                 error = str(exc)
                 self.actions.put(lambda error=error: reply(f"Upload failed: {error}"))
         threading.Thread(target=prepare_upload, daemon=True).start()
-
-    @staticmethod
-    def _edit_list(values: list[str], arg: str, reply: Callable[[str], None]) -> None:
-        if not arg: reply(", ".join(values) or "The list is empty.")
-        elif arg.startswith("+") and arg[1:]:
-            if arg[1:] not in values: values.append(arg[1:])
-            reply("Added.")
-        elif arg.startswith("-") and arg[1:]:
-            try: values.remove(arg[1:]); reply("Deleted.")
-            except ValueError: reply("That value is not in the list.")
-        else: reply("Use +VALUE or -VALUE.")
 
     def _join(self, channel: str, password: str) -> None:
         if str(channel).isdigit(): channel_id = int(channel)

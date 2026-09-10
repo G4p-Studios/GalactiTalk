@@ -8,7 +8,7 @@ import signal
 import sys
 
 from .bot import Connection, RuntimeControl, tt
-from .config import configure, read_config, validate_config
+from .config import configure, read_config, remove_deprecated_media_controls, validate_config
 from .services import MediaCache, OpenAIService, StarPool, YouTubeService
 
 
@@ -17,6 +17,7 @@ DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config.ini"
 
 
 def run(config_path: Path) -> int:
+    remove_deprecated_media_controls(config_path)
     try:
         config = read_config(config_path)
     except (ValueError, configparser.Error) as exc:
@@ -43,7 +44,7 @@ def run(config_path: Path) -> int:
     control = RuntimeControl()
     previous_sigterm = signal.getsignal(signal.SIGTERM)
     signal.signal(signal.SIGTERM, lambda _signum, _frame: control.request_stop())
-    connections = [Connection(server, config, config_path, ai, star, youtube, cache, control)
+    connections = [Connection(server, config, ai, star, youtube, cache, control)
                    for server in config.servers if server.enabled]
     if not connections:
         print("All TeamTalk server sections are disabled.")

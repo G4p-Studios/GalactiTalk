@@ -95,8 +95,10 @@ Users must be in GalactiTalk's current channel before requesting speech.
 ## YouTube/media commands
 
 Media commands are private messages and keep the original TTMediaBot compact
-names. YouTube is the only searchable media service. Direct URLs and admin-only
-local files/directories are still accepted by `u`.
+names. YouTube is the only searchable media service. Searches use the original
+lightweight search path, and playback resolves an audio stream URL for MPV
+instead of downloading the complete file first. Direct URLs and admin-only local
+files/directories are accepted by `u`.
 
 - `a` about; `p QUERY` search/play; bare `p` pause/resume.
 - `u URL`, `s`, `b`, `n`, `c NUMBER` — URL, stop, previous, next, selection.
@@ -105,14 +107,11 @@ local files/directories are still accepted by `u`.
 - `f`, `r`, `gl`, `dl` — favorites, recents, direct link, channel upload.
 - `sv` — reports the sole `yt` service.
 
-Original administrative controls are retained: `bc`, `cg`, `cl`, `cn`, `cs`,
-`cc`, `cm`, `jc`, `l`, `ua`, `ub`, `eh`, `sc`, `va`, `rs`, `q`, and `gcid`.
-Native TeamTalk administrators and usernames listed in each server's `admins`
-setting receive access. The `sc` command saves runtime changes back to the same
-INI while preserving disabled legacy-account sections.
-
-All of these commands have individual help topics—for example, `help p`,
-`help voice`, `help f`, and `help jc`.
+The old TTMediaBot moderation and administrative command group is intentionally
+disabled for now, including configured administrators, command blocking,
+banning, locking, and their list editors. Native TeamTalk administrators still
+receive core administrator access. Every active command has an individual help
+topic—for example, `help p`, `help voice`, and `help f`.
 
 ## Configuration and security
 

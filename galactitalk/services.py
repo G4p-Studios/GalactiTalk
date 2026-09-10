@@ -12,16 +12,29 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from typing import Callable
+from urllib.parse import parse_qs, urlparse
 
+import httpx
 from openai import OpenAI
 import websockets.exceptions
 import websockets.sync.client
 from yt_dlp import YoutubeDL
+from youtubesearchpython import VideosSearch as _VideosSearch
+from youtubesearchpython.core.constants import userAgent
 
 from .config import MediaSettings, OpenAISettings, StarSettings
 
 
 USER_REVISION = 4
+
+
+class VideosSearch(_VideosSearch):
+    """Original TTMediaBot search client, updated for current HTTPX."""
+
+    def syncPostRequest(self) -> httpx.Response:
+        transport = httpx.HTTPTransport(local_address="0.0.0.0")
+        with httpx.Client(transport=transport, timeout=self.timeout) as client:
+            return client.post(self.url, headers={"User-Agent": userAgent}, json=self.data)
 
 
 class OpenAIService:
@@ -287,7 +300,11 @@ class YouTubeService:
         self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="youtube")
 
     def _options(self) -> dict:
-        options: dict[str, object] = {"quiet": True, "no_warnings": True, "socket_timeout": 15}
+        options: dict[str, object] = {
+            "quiet": True, "no_warnings": True, "noprogress": True,
+            "socket_timeout": 5, "source_address": "0.0.0.0",
+            "format": "m4a/bestaudio/best[protocol!=m3u8_native]/best",
+        }
         cookie = Path(self.settings.cookiefile_path).expanduser() if self.settings.cookiefile_path else None
         if cookie and cookie.is_file():
             options["cookiefile"] = str(cookie)
@@ -298,10 +315,9 @@ class YouTubeService:
 
     def _search_done(self, query: str, callback: Callable) -> None:
         try:
-            options = self._options() | {"extract_flat": "in_playlist", "skip_download": True}
-            with YoutubeDL(options) as ydl:
-                info = ydl.extract_info(f"ytsearch{self.settings.search_results}:{query}", download=False)
-            tracks = [Track(entry.get("webpage_url") or entry.get("url", ""), entry.get("title", "")) for entry in info.get("entries", []) if entry]
+            result = VideosSearch(query, limit=self.settings.search_results, timeout=10).result()
+            tracks = [Track(item["link"], item.get("title", ""))
+                      for item in result.get("result", []) if item.get("link")]
             callback(None, tracks)
         except Exception as exc:
             callback(str(exc), None)
@@ -316,32 +332,63 @@ class YouTubeService:
                 tracks = [Track(str(item), item.name, "local") for item in (sorted(path.rglob("*")) if path.is_dir() else [path]) if item.is_file()]
                 callback(None, tracks)
                 return
-            options = self._options() | {"extract_flat": "in_playlist", "skip_download": True}
+            parsed = urlparse(url)
+            hostname = (parsed.hostname or "").casefold().removeprefix("www.")
+            youtube_host = hostname in {"youtube.com", "music.youtube.com", "m.youtube.com", "youtu.be"}
+            if youtube_host and "list" not in parse_qs(parsed.query):
+                # A single YouTube item needs only the later stream-resolution pass.
+                callback(None, [Track(url, "", "youtube")])
+                return
+            options = self._options() | {"skip_download": True}
             with YoutubeDL(options) as ydl:
-                info = ydl.extract_info(url, download=False)
-            entries = info.get("entries") if info else None
-            raw = entries if entries is not None else [info]
-            tracks = [Track(item.get("webpage_url") or item.get("original_url") or item.get("url", url), item.get("title", ""), "youtube", bool(item.get("is_live"))) for item in raw if item]
-            callback(None, tracks)
-        except Exception:
+                info = ydl.extract_info(url, download=False, process=False)
+            callback(None, self._tracks_from_info(info, url))
+        except Exception as exc:
             # Preserve TTMediaBot's direct-stream fallback for non-YouTube URLs.
+            print(f"URL inspection failed for {url!r}; trying it as a direct stream: {exc}")
             callback(None, [Track(url, url, "direct")])
+
+    @classmethod
+    def _tracks_from_info(cls, info: dict | None, fallback: str) -> list[Track]:
+        if not info:
+            return [Track(fallback, fallback, "direct")]
+        if info.get("_type") in {"playlist", "multi_video"} or info.get("entries") is not None:
+            tracks: list[Track] = []
+            for entry in info.get("entries") or []:
+                tracks.extend(cls._tracks_from_info(entry, fallback))
+            return tracks
+        source = info.get("webpage_url") or info.get("original_url") or info.get("url") or fallback
+        if info.get("ie_key") == "Youtube" and "://" not in source:
+            source = f"https://www.youtube.com/watch?v={source}"
+        return [Track(source, info.get("title", ""), "youtube", bool(info.get("is_live")))]
 
     def prepare(self, track: Track, directory: Path) -> tuple[Path | str, bool]:
         if track.kind == "local":
             return Path(track.source), False
         if track.kind == "direct":
             return track.source, False
-        options = self._options() | {
-            "format": "bestaudio/best", "noplaylist": True,
-            "outtmpl": str(directory / "media.%(ext)s"), "restrictfilenames": True,
-        }
+        options = self._options() | {"noplaylist": True, "skip_download": True}
         with YoutubeDL(options) as ydl:
-            info = ydl.extract_info(track.source, download=not track.is_live)
+            info = ydl.extract_info(track.source, download=False)
             track.name = info.get("title") or track.name
             track.is_live = bool(info.get("is_live"))
-            if track.is_live:
-                return info["url"], True
+            stream_url = info.get("url")
+            if not stream_url:
+                requested = info.get("requested_formats") or info.get("requested_downloads") or []
+                stream_url = next((item.get("url") for item in requested if item.get("url")), None)
+            if not stream_url:
+                raise RuntimeError("yt-dlp did not return a playable audio stream")
+            return stream_url, track.is_live
+
+    def download(self, track: Track, directory: Path) -> tuple[Path, bool]:
+        options = self._options() | {
+            "noplaylist": True, "outtmpl": str(directory / "media.%(ext)s"),
+            "restrictfilenames": True,
+        }
+        with YoutubeDL(options) as ydl:
+            info = ydl.extract_info(track.source, download=True)
+            if info.get("is_live"):
+                raise RuntimeError("Live streams cannot be uploaded")
             requested = info.get("requested_downloads") or []
             filename = requested[0].get("filepath") if requested else ydl.prepare_filename(info)
             return Path(filename), False

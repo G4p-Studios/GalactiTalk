@@ -129,9 +129,6 @@ class ServerSettings:
     enabled: bool = True
     status: str = ""
     gender: str = "n"
-    admins: list[str] = field(default_factory=list)
-    banned_users: list[str] = field(default_factory=list)
-    blocked_media_commands: list[str] = field(default_factory=list)
     start_commands: list[str] = field(default_factory=list)
 
 
@@ -209,8 +206,6 @@ def read_config(path: Path) -> AppConfig:
             username=s.get("username", ""), password=s.get("password", ""), channel=s.get("channel", "/"),
             channel_password=s.get("channel_password", ""), enabled=parse_bool(s.get("enabled"), True),
             status=s.get("status", ""), gender=s.get("gender", "n").strip().casefold(),
-            admins=parse_list(s.get("admins", "")), banned_users=parse_list(s.get("banned_users", "")),
-            blocked_media_commands=parse_list(s.get("blocked_media_commands", "")),
             start_commands=parse_list(s.get("start_commands", "")),
         ))
     return config
@@ -245,9 +240,7 @@ def write_config(path: Path, config: AppConfig) -> None:
             "previous_nickname": server.previous_nickname,
             "username": server.username, "password": server.password, "channel": server.channel,
             "channel_password": server.channel_password,
-            "status": server.status, "gender": server.gender, "admins": ", ".join(server.admins),
-            "banned_users": ", ".join(server.banned_users),
-            "blocked_media_commands": ", ".join(server.blocked_media_commands),
+            "status": server.status, "gender": server.gender,
             "start_commands": ", ".join(server.start_commands),
         }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -350,10 +343,28 @@ def configure(path: Path) -> None:
             channel_password=prompt("Channel password", prior.channel_password, secret=True),
             enabled=prompt_bool("Enable this server", prior.enabled),
             status=prompt("Status text", prior.status), gender=prompt("Gender (n, m, or f)", prior.gender).casefold(),
-            admins=parse_list(prompt("Additional admin usernames (comma-separated)", ", ".join(prior.admins))),
-            banned_users=parse_list(prompt("Banned usernames (comma-separated)", ", ".join(prior.banned_users))),
-            blocked_media_commands=parse_list(prompt("Blocked media commands (comma-separated)", ", ".join(prior.blocked_media_commands))),
             start_commands=parse_list(prompt("Startup media commands (comma-separated)", ", ".join(prior.start_commands))),
         ))
     write_config(path, AppConfig(ai, star, media, bot, teamtalk, servers))
     print(f"Configuration written to {path}")
+
+
+def remove_deprecated_media_controls(path: Path) -> bool:
+    """Remove retired TTMediaBot moderation options without rewriting secrets."""
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(path, encoding="utf-8")
+    changed = False
+    for section in parser.sections():
+        if not section.casefold().startswith("server:"):
+            continue
+        for option in ("admins", "banned_users", "blocked_media_commands"):
+            if parser.remove_option(section, option):
+                changed = True
+    if changed:
+        with path.open("w", encoding="utf-8") as stream:
+            parser.write(stream)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+    return changed
