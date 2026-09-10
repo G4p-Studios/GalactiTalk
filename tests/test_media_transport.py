@@ -44,12 +44,13 @@ class MediaTransportTests(unittest.TestCase):
         process = Mock()
         process.poll.return_value = None
         process.wait.return_value = 0
+        module_ids = iter((41, 42))
 
         def run(command, **kwargs):
             if command[:3] == ["pactl", "load-module", "module-null-sink"]:
                 sink = next(item.split("=", 1)[1] for item in command if item.startswith("sink_name="))
                 device.szDeviceName = sink + ".monitor"
-                return SimpleNamespace(returncode=0, stdout="42\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout=f"{next(module_ids)}\n", stderr="")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         with patch("galactitalk.media_transport.subprocess.run", side_effect=run) as runner, \
@@ -59,8 +60,18 @@ class MediaTransportTests(unittest.TestCase):
             player.start(Path("song.opus"), 55, 1.25, 150, 8)
             command = popen.call_args.args[0]
             self.assertTrue(any(item.startswith("--audio-device=pulse/galactitalk_my_server_") for item in command))
+            self.assertIn("--audio-samplerate=48000", command)
+            self.assertIn("--audio-format=s16", command)
+            self.assertIn("--audio-channels=stereo", command)
             self.assertIn("--volume=55", command)
             self.assertIn("--speed=1.25", command)
+            loads = [call.args[0] for call in runner.call_args_list
+                     if call.args[0][:3] == ["pactl", "load-module", "module-null-sink"]]
+            self.assertEqual(len(loads), 2)
+            self.assertTrue(any(item.startswith("sink_name=galactitalk_route_guard_")
+                                for item in loads[0]))
+            self.assertIn("priority.session=1", loads[0][-1])
+            self.assertIn("priority.session=0", loads[1][-1])
             client.initSoundInputDevice.assert_called_once_with(17)
             tt_module._RestartSoundSystem.assert_called_once_with()
             client.enableVoiceTransmission.assert_called_with(True)
@@ -71,7 +82,8 @@ class MediaTransportTests(unittest.TestCase):
             self.assertEqual(closed, ["handle"])
             unloads = [call.args[0] for call in runner.call_args_list
                        if call.args[0][:2] == ["pactl", "unload-module"]]
-            self.assertEqual(unloads, [["pactl", "unload-module", "42"]])
+            self.assertEqual(unloads, [["pactl", "unload-module", "42"],
+                                       ["pactl", "unload-module", "41"]])
             self.assertEqual(player.sink_name, "")
 
     def test_starting_a_second_route_closes_rescans_and_restores_first(self):
@@ -94,7 +106,7 @@ class MediaTransportTests(unittest.TestCase):
             _RestartSoundSystem=Mock(return_value=True),
             _CloseSoundInputDevice=lambda handle: closed.append(handle),
         )
-        module_ids = iter((41, 42))
+        module_ids = iter((40, 41, 42))
 
         def run(command, **kwargs):
             if command[:3] == ["pactl", "load-module", "module-null-sink"]:
@@ -107,7 +119,7 @@ class MediaTransportTests(unittest.TestCase):
         processes = [Mock(), Mock()]
         for process in processes:
             process.poll.return_value = None
-        with patch("galactitalk.media_transport.subprocess.run", side_effect=run), \
+        with patch("galactitalk.media_transport.subprocess.run", side_effect=run) as runner, \
                 patch("galactitalk.media_transport.subprocess.Popen", side_effect=processes), \
                 patch("galactitalk.media_transport.threading.Thread"):
             first = PulseAudioMediaPlayer(client("first"), tt_module, "first", lambda *_: None)
@@ -123,7 +135,15 @@ class MediaTransportTests(unittest.TestCase):
             self.assertTrue(second.input_open)
 
             second.stop()
+            unloads = [call.args[0] for call in runner.call_args_list
+                       if call.args[0][:2] == ["pactl", "unload-module"]]
+            self.assertEqual(unloads, [["pactl", "unload-module", "42"]])
             first.stop()
+            unloads = [call.args[0] for call in runner.call_args_list
+                       if call.args[0][:2] == ["pactl", "unload-module"]]
+            self.assertEqual(unloads, [["pactl", "unload-module", "42"],
+                                       ["pactl", "unload-module", "41"],
+                                       ["pactl", "unload-module", "40"]])
 
 
 if __name__ == "__main__":

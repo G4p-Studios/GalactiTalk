@@ -174,6 +174,12 @@ through MPV. On stop, failure, replacement, or completion, GalactiTalk closes
 the TeamTalk input and unloads the null sink. Users do not create or select audio
 devices manually.
 
+While media is active, a lower-priority silent guard sink prevents a private
+media route from becoming the desktop default on headless systems. This keeps
+unrelated application audio out of the bot's monitor and prevents feedback. MPV,
+the null sink, and TeamTalk use 48 kHz PCM16 stereo throughout the route to avoid
+unnecessary live resampling.
+
 When MPV exposes stream tags, the TeamTalk status replaces the source filename
 with TTMediaBot's `artist - title - station` metadata string. MPV's media title
 is used only as a fallback when real tags are unavailable.

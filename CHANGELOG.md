@@ -15,6 +15,8 @@ All notable changes to GalactiTalk are documented here. The project follows
 - Stream metadata now replaces filenames in media status messages regardless of
   how the stream URL was classified, and `dl` uploads use sanitized track names
   instead of `media`.
+- Isolated media routes no longer become the system default or capture unrelated
+  application playback, preventing feedback and cross-routing on headless hosts.
 
 ## [0.1.0] - 2026-09-10
 

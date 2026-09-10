@@ -17,6 +17,8 @@ from typing import Callable
 
 _SOUND_SYSTEM_LOCK = threading.RLock()
 _ACTIVE_PLAYERS: set["PulseAudioMediaPlayer"] = set()
+_ROUTE_GUARD_MODULE_ID: int | None = None
+_ROUTE_GUARD_SINK = f"galactitalk_route_guard_{os.getpid()}"
 
 
 class PulseAudioMediaPlayer:
@@ -58,6 +60,44 @@ class PulseAudioMediaPlayer:
                           stderr=subprocess.DEVNULL).returncode:
             raise RuntimeError("PulseAudio/PipeWire-Pulse is installed but no user audio server is available")
 
+    @staticmethod
+    def _load_null_sink(name: str, priority: int) -> int:
+        result = subprocess.run(
+            ["pactl", "load-module", "module-null-sink", f"sink_name={name}",
+             "format=s16le", "rate=48000", "channels=2",
+             "channel_map=front-left,front-right",
+             (f"sink_properties=device.description={name} node.virtual=true "
+              f"priority.session={priority}")],
+            text=True, capture_output=True,
+        )
+        if result.returncode:
+            raise RuntimeError(
+                f"could not create the temporary PulseAudio route: {result.stderr.strip()}")
+        try:
+            return int(result.stdout.strip())
+        except ValueError as exc:
+            raise RuntimeError(
+                f"PulseAudio returned an invalid module ID for {name!r}") from exc
+
+    @classmethod
+    def _ensure_route_guard(cls) -> None:
+        global _ROUTE_GUARD_MODULE_ID
+        if _ROUTE_GUARD_MODULE_ID is None:
+            # On a headless session the first null sink becomes the system
+            # default. Keep unrelated playback on this silent guard instead of
+            # letting it enter a bot's monitor source and be retransmitted.
+            _ROUTE_GUARD_MODULE_ID = cls._load_null_sink(
+                _ROUTE_GUARD_SINK, priority=1)
+
+    @staticmethod
+    def _release_route_guard_if_unused() -> None:
+        global _ROUTE_GUARD_MODULE_ID
+        if _ACTIVE_PLAYERS or _ROUTE_GUARD_MODULE_ID is None:
+            return
+        module_id, _ROUTE_GUARD_MODULE_ID = _ROUTE_GUARD_MODULE_ID, None
+        subprocess.run(["pactl", "unload-module", str(module_id)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     def start(self, source: Path | str, volume: int, speed: float,
               maximum_volume: int, token: int) -> None:
         self.stop()
@@ -67,14 +107,9 @@ class PulseAudioMediaPlayer:
         self.sink_name = f"galactitalk_{self.name}_{unique}"
         try:
             with _SOUND_SYSTEM_LOCK:
-                result = subprocess.run(
-                    ["pactl", "load-module", "module-null-sink", f"sink_name={self.sink_name}",
-                     f"sink_properties=device.description={self.sink_name}"],
-                    text=True, capture_output=True,
-                )
-                if result.returncode:
-                    raise RuntimeError(f"could not create the temporary PulseAudio route: {result.stderr.strip()}")
-                self.module_id = int(result.stdout.strip())
+                self._ensure_route_guard()
+                self.module_id = self._load_null_sink(
+                    self.sink_name, priority=0)
                 _ACTIVE_PLAYERS.add(self)
                 self._rescan_and_reopen_routes()
 
@@ -84,6 +119,8 @@ class PulseAudioMediaPlayer:
             command = [
                 "mpv", "--no-config", "--no-video", "--really-quiet", "--idle=no",
                 f"--audio-device=pulse/{self.sink_name}",
+                "--audio-samplerate=48000", "--audio-format=s16",
+                "--audio-channels=stereo",
                 f"--input-ipc-server={self.socket_path}",
                 f"--volume={volume}", f"--volume-max={max(100, maximum_volume)}",
                 f"--speed={speed:g}", "--", str(source),
@@ -279,6 +316,7 @@ class PulseAudioMediaPlayer:
                 subprocess.run(["pactl", "unload-module", str(module_id)],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             _ACTIVE_PLAYERS.discard(self)
+            self._release_route_guard_if_unused()
         if self.socket_path:
             self.socket_path.unlink(missing_ok=True)
             self.socket_path = None
