@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import math
-import os
 from pathlib import Path
 import queue
 import random
 import re
-import shutil
-import subprocess
 import tempfile
 import threading
 import traceback
@@ -16,6 +13,7 @@ from typing import Callable
 from teamtalk_sdk import load_teamtalk_sdk
 
 from .config import AppConfig, ServerSettings, write_config
+from .media_transport import PulseAudioMediaPlayer
 from .services import MediaCache, OpenAIService, StarPool, Track, YouTubeService
 
 
@@ -26,7 +24,7 @@ GENDERS = {"m": 0, "f": 256, "n": 4096}
 
 COMMAND_HELP = {
     "help": "Usage: help [command]. Shows the unified command list, or detailed usage and behavior for one command. Slash-prefixed forms and the old h alias are not accepted.",
-    "gpt": "Usage: gpt PROMPT. Sends PROMPT to ChatGPT using your private conversation context. In a channel, address the bot and write: @GalactiTalk gpt PROMPT.",
+    "gpt": "Usage: gpt PROMPT. Sends PROMPT to ChatGPT using your private conversation context. In a channel, use @chatgpt PROMPT (case-insensitive).",
     "say": "Usage: say TEXT. Synthesizes TEXT with your selected STAR voice and streams it into the bot's channel. You must be in that channel.",
     "clear": "Usage: clear. Clears only your private ChatGPT conversation context on this server.",
     "clear-all": "Usage: clear-all. Administrator-only. Clears every private and channel ChatGPT context across the process.",
@@ -50,7 +48,7 @@ COMMAND_HELP = {
     "sb": "Usage: sb [SECONDS]. Seeks media backward by SECONDS, or by the configured default seek step when omitted.",
     "sf": "Usage: sf [SECONDS]. Seeks media forward by SECONDS, or by the configured default seek step when omitted.",
     "v": "Usage: v [VOLUME]. Shows the media volume when omitted, or sets per-stream gain between 0 and the configured maximum.",
-    "sp": "Usage: sp [SPEED]. Shows playback speed when omitted, or sets a speed from 0.25 through 4. Changed-speed audio is prepared with FFmpeg.",
+    "sp": "Usage: sp [SPEED]. Shows playback speed when omitted, or changes the active MPV playback speed from 0.25 through 4.",
     "m": "Usage: m [MODE]. Shows or selects media mode: st single, rt repeat track, tl list, rtl repeating list, or rnd random.",
     "f": "Usage: f, f +, f -NUMBER, or f NUMBER. Lists favorites; adds the current track; deletes a favorite; or plays a favorite. Requires an authenticated username.",
     "r": "Usage: r [NUMBER]. Lists migrated/recent media tracks, or plays the selected recent entry.",
@@ -60,7 +58,7 @@ COMMAND_HELP = {
     "bc": "Usage: bc, bc +COMMAND, or bc -COMMAND. Administrator-only. Lists, blocks, or unblocks media commands for regular users.",
     "cg": "Usage: cg n|m|f. Administrator-only. Changes the bot gender/status-mode flag on this server.",
     "cl": "Usage: cl [LANGUAGE]. Administrator-only. Shows language support; built-in GalactiTalk messages currently use English.",
-    "cn": "Usage: cn NICKNAME. Administrator-only. Changes the live nickname and channel-mention matcher for this server.",
+    "cn": "Usage: cn NICKNAME. Administrator-only. Changes the live nickname for this server. ChatGPT channel prompts always use @chatgpt.",
     "cs": "Usage: cs [STATUS]. Administrator-only. Changes or clears the bot's TeamTalk status message.",
     "cc": "Usage: cc. Administrator-only. Clears all shared media recents and favorites from the cache.",
     "cm": "Usage: cm. Administrator-only. Toggles media-request announcements in TeamTalk channels.",
@@ -70,7 +68,7 @@ COMMAND_HELP = {
     "ub": "Usage: ub, ub +USERNAME, or ub -USERNAME. Administrator-only. Lists or edits banned usernames.",
     "eh": "Usage: eh. Administrator-only. Reports the built-in event handling state; connection and playback events are always enabled.",
     "sc": "Usage: sc. Administrator-only. Saves runtime nickname, status, access-list, and toggle changes to config.ini.",
-    "va": "Usage: va. Administrator-only. Reports native media-transmission state; GalactiTalk does not use a sound-input voice route.",
+    "va": "Usage: va. Administrator-only. Reports automatic MPV/PulseAudio media-routing state. Each playback gets a private temporary sink and TeamTalk monitor input.",
     "rs": "Usage: rs. Administrator-only media-compatible alias for restart.",
     "q": "Usage: q. Administrator-only media-compatible alias for quit.",
     "gcid": "Usage: gcid. Administrator-only. Returns the numeric ID of the bot's current TeamTalk channel.",
@@ -97,7 +95,7 @@ class RuntimeControl:
 
 
 class Connection(tt.TeamTalk, threading.Thread):
-    """One independent TeamTalk connection and native SDK media route."""
+    """One independent TeamTalk connection with an isolated media route."""
 
     def __init__(self, server: ServerSettings, config: AppConfig, config_path: Path,
                  ai: OpenAIService | None, star: StarPool, youtube: YouTubeService,
@@ -134,11 +132,16 @@ class Connection(tt.TeamTalk, threading.Thread):
         self.star_queue: queue.Queue[tuple[Path, int, str]] = queue.Queue()
         self.star_current: tuple[Path, int, str] | None = None
         self.locked = False
+        self.media_player = PulseAudioMediaPlayer(
+            self, tt, server.name,
+            lambda token, code: self.actions.put(
+                lambda token=token, code=code: self._media_exited(token, code)),
+        )
 
     @staticmethod
     def _compile_mention(nickname: str) -> re.Pattern[str]:
-        nick = re.escape(nickname.strip())
-        return re.compile(rf"^\s*@(?:\[{nick}\]|{nick})(?=$|[\s,:-])[\s,:-]*(.*)$", re.I | re.S)
+        del nickname  # Kept in the signature for compatibility with migrated callers.
+        return re.compile(r"^\s*@chatgpt(?=$|[\s,:-])[\s,:-]*(.*)$", re.I | re.S)
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -234,45 +237,23 @@ class Connection(tt.TeamTalk, threading.Thread):
         if message.nMsgType == tt.TextMsgType.MSGTYPE_CHANNEL:
             match = self.mention.match(content)
             if match and match.group(1).strip():
-                addressed = match.group(1).strip()
-                command, _, arguments = addressed.partition(" ")
-                if command.casefold() == "gpt" and arguments.strip():
-                    self._submit_ai(f"channel:{self.server.name}:{message.nChannelID}", message.nFromUserID,
-                                    arguments.strip(), lambda answer: self._send_channel(message.nChannelID, answer))
-                else:
-                    self._send_channel(message.nChannelID, f"Use: @[{self.server.nickname}] gpt PROMPT. Send the bot a private message containing help for all commands.")
+                self._submit_ai(f"channel:{self.server.name}:{message.nChannelID}", message.nFromUserID,
+                                match.group(1).strip(), lambda answer: self._send_channel(message.nChannelID, answer))
+            elif match:
+                self._send_channel(message.nChannelID, "Use: @chatgpt PROMPT. Send the bot a private message containing help for all commands.")
             return
         self._handle_private(message.nFromUserID, content)
 
     def onStreamMediaFile(self, info):
-        self.elapsed_ms, self.duration_ms = int(info.uElapsedMSec), int(info.uDurationMSec)
         status = info.nStatus
-        if status == tt.MediaFileStatus.MFS_PAUSED:
-            self.state = "paused"
-            return
-        if status in {tt.MediaFileStatus.MFS_STARTED, tt.MediaFileStatus.MFS_PLAYING}:
-            self.state = "playing"
-            return
         if status not in DONE_MEDIA:
             return
         if self.star_current:
             path, user_id, _ = self.star_current
             self.star_current = None
-            self.state = "stopped"
             path.unlink(missing_ok=True)
             if status == tt.MediaFileStatus.MFS_ERROR:
                 self._send_private(user_id, "STAR audio streaming failed.")
-            self._start_waiting_stream()
-            return
-        if status == tt.MediaFileStatus.MFS_ABORTED and self.preparing:
-            # An old stream was stopped so a newly selected track could be prepared.
-            return
-        was_playing = self.current_track is not None
-        self.state = "stopped"
-        if was_playing and status == tt.MediaFileStatus.MFS_FINISHED:
-            self._advance_after_finish()
-        elif status in {tt.MediaFileStatus.MFS_ERROR, tt.MediaFileStatus.MFS_ABORTED}:
-            self.current_track = None
             self._start_waiting_stream()
 
     def onCmdFileNew(self, remote_file):
@@ -559,8 +540,7 @@ class Connection(tt.TeamTalk, threading.Thread):
             else:
                 try: amount = float(arg) if arg else self.config.media.seek_step
                 except ValueError: reply("Seek step must be a number."); return
-                target = max(0, self.elapsed_ms + int(amount*1000)*(1 if command == "sf" else -1))
-                self._update_playback(offset=target)
+                self._update_playback(relative_seconds=amount * (1 if command == "sf" else -1))
         elif command == "v":
             if not arg: reply(str(self.volume))
             else:
@@ -576,7 +556,7 @@ class Connection(tt.TeamTalk, threading.Thread):
                 if not 0.25 <= value <= 4: reply("Speed must be 0.25-4.")
                 else:
                     self.speed = value
-                    if self.current_track: self._play_index(self.track_index)
+                    if self.current_track: self.media_player.set_speed(value)
                     reply(f"Playback speed set to {value:g}.")
         elif command == "m":
             if not arg: reply(f"Current mode: {self.mode} ({MODES[self.mode]}). Available: " + ", ".join(f"{k}={v}" for k,v in MODES.items()))
@@ -595,7 +575,7 @@ class Connection(tt.TeamTalk, threading.Thread):
             else: self.server.gender = arg.casefold(); self.doChangeStatus(GENDERS[self.server.gender], tt.ttstr(self.server.status))
         elif command == "cl": reply("Current language: en. GalactiTalk's built-in messages are English.")
         elif command == "cn":
-            if arg: self.server.nickname = arg; self.mention = self._compile_mention(arg); self.doChangeNickname(tt.ttstr(arg))
+            if arg: self.server.nickname = arg; self.doChangeNickname(tt.ttstr(arg))
             else: reply("Usage: cn NICKNAME")
         elif command == "cs": self.server.status = arg; self.doChangeStatus(GENDERS.get(self.server.gender,4096), tt.ttstr(arg))
         elif command == "cc": self.cache.recents.clear(); self.cache.favorites.clear(); self.cache.save(); reply("Cache cleared.")
@@ -606,7 +586,7 @@ class Connection(tt.TeamTalk, threading.Thread):
         elif command == "l": self.locked = not self.locked; reply("Locked." if self.locked else "Unlocked.")
         elif command == "eh": reply("Event handling is built in and enabled for every connection.")
         elif command == "sc": write_config(self.config_path, self.config); reply("Configuration saved.")
-        elif command == "va": reply("Native media streaming is enabled; no sound-device voice route is required.")
+        elif command == "va": reply("Automatic media routing is enabled: each MPV playback owns a temporary PulseAudio sink and monitor source, which are removed when playback stops.")
         elif command == "gcid": reply(str(self.channel_id))
         elif command in {"rs", "q"}: self.control.request_stop(command == "rs")
 
@@ -625,8 +605,11 @@ class Connection(tt.TeamTalk, threading.Thread):
         self.play_token += 1
         token = self.play_token
         self.track_index, self.current_track, self.preparing = index, self.tracks[index], True
-        track, speed = self.current_track, self.speed
-        self.stopStreamingMediaFileToChannel()
+        self.state = "preparing"
+        track = self.current_track
+        self.media_player.stop()
+        if self.star_current:
+            self.stopStreamingMediaFileToChannel()
         old_temp, self.current_temp = self.current_temp, None
         if old_temp: old_temp.cleanup()
         def prepare():
@@ -636,8 +619,6 @@ class Connection(tt.TeamTalk, threading.Thread):
             temp = tempfile.TemporaryDirectory(prefix="galactitalk-media-", dir=temp_root)
             try:
                 source, live = self.youtube.prepare(track, Path(temp.name))
-                if speed != 1 and not live and isinstance(source, Path):
-                    source = self._speed_file(source, Path(temp.name), speed)
                 self.actions.put(lambda: self._prepared(token, temp, source))
             except Exception as exc:
                 temp.cleanup()
@@ -645,26 +626,15 @@ class Connection(tt.TeamTalk, threading.Thread):
                 self.actions.put(lambda error=error: self._prepare_failed(token, error))
         threading.Thread(target=prepare, name=f"prepare:{self.server.name}", daemon=True).start()
 
-    @staticmethod
-    def _speed_file(source: Path, directory: Path, speed: float) -> Path:
-        output = directory / "speed.opus"
-        factors, remaining = [], speed
-        while remaining > 2: factors.append(2.0); remaining /= 2
-        while remaining < .5: factors.append(.5); remaining /= .5
-        factors.append(remaining)
-        subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(source), "-vn",
-                        "-filter:a", ",".join(f"atempo={x:g}" for x in factors), str(output)], check=True)
-        return output
-
     def _prepared(self, token: int, temp, source: Path | str) -> None:
         if token != self.play_token:
             temp.cleanup(); return
         self.preparing, self.current_temp, self.current_source = False, temp, source
-        playback = self._playback(False, 0)
-        start_ex = getattr(tt, "_StartStreamingMediaFileToChannelEx", None)
-        ok = start_ex(self._tt, tt.ttstr(str(source)), playback, None) if start_ex else self.startStreamingMediaFileToChannel(tt.ttstr(str(source)), None)
-        if not ok:
-            self._prepare_failed(token, "TeamTalk rejected the media source")
+        try:
+            self.media_player.start(source, self.volume, self.speed,
+                                    self.config.media.max_volume, token)
+        except Exception as exc:
+            self._prepare_failed(token, str(exc))
             return
         self.state = "playing"
         if self.current_track:
@@ -674,27 +644,42 @@ class Connection(tt.TeamTalk, threading.Thread):
 
     def _prepare_failed(self, token: int, error: str) -> None:
         if token != self.play_token: return
+        self.media_player.stop()
+        if self.current_temp:
+            self.current_temp.cleanup()
+            self.current_temp = None
         self.preparing, self.state, self.current_track = False, "stopped", None
         print(f"{self.server.name}: media preparation failed: {error}")
+        self._start_waiting_stream()
 
-    def _playback(self, paused: bool, offset: int):
-        playback = tt.MediaFilePlayback()
-        playback.uOffsetMSec = offset
-        playback.bPaused = paused
-        playback.audioPreprocessor.nPreprocessor = tt.AudioPreprocessorType.TEAMTALK_AUDIOPREPROCESSOR
-        maximum = getattr(tt.SoundLevel, "SOUND_GAIN_MAX", 32000)
-        default = getattr(tt.SoundLevel, "SOUND_GAIN_DEFAULT", 1000)
-        playback.audioPreprocessor.ttpreprocessor.nGainLevel = int(default * self.volume / 50)
-        playback.audioPreprocessor.ttpreprocessor.nGainLevel = min(maximum, playback.audioPreprocessor.ttpreprocessor.nGainLevel)
-        return playback
-
-    def _update_playback(self, paused: bool | None = None, offset: int | None = None) -> None:
+    def _update_playback(self, paused: bool | None = None,
+                         relative_seconds: float | None = None) -> None:
         if not self.current_track: return
-        paused = self.state == "paused" if paused is None else paused
-        offset = getattr(tt, "TT_MEDIAPLAYBACK_OFFSET_IGNORE", 0xFFFFFFFF) if offset is None else offset
-        update = getattr(tt, "_UpdateStreamingMediaFileToChannel", None)
-        if update and update(self._tt, self._playback(paused, offset), None):
-            self.state = "paused" if paused else "playing"
+        if relative_seconds is not None:
+            self.media_player.seek(relative_seconds)
+        elif paused is not None:
+            if self.media_player.pause(paused):
+                self.state = "paused" if paused else "playing"
+        else:
+            self.media_player.set_volume(self.volume)
+
+    def _media_exited(self, token: int, returncode: int) -> None:
+        if token != self.play_token:
+            return
+        self.media_player.stop()
+        if self.current_temp:
+            self.current_temp.cleanup()
+            self.current_temp = None
+        self.current_source = None
+        self.elapsed_ms = self.duration_ms = 0
+        self.state = "stopped"
+        if returncode == 0 and self.current_track is not None:
+            self._advance_after_finish()
+        else:
+            if returncode:
+                print(f"{self.server.name}: MPV media playback failed with exit status {returncode}")
+            self.current_track = None
+            self._start_waiting_stream()
 
     def _step(self, delta: int, reply: Callable[[str], None]) -> None:
         if not self.tracks: reply("Nothing is playing."); return
@@ -715,11 +700,14 @@ class Connection(tt.TeamTalk, threading.Thread):
 
     def _stop_media(self) -> None:
         self.play_token += 1; self.preparing = False; self.current_track = None; self.state = "stopped"
-        self.stopStreamingMediaFileToChannel()
+        self.media_player.stop()
         if self.current_temp: self.current_temp.cleanup(); self.current_temp = None
+        self.current_source = None
         self._start_waiting_stream()
 
     def _stop_all(self) -> None:
+        self.play_token += 1
+        self.media_player.stop()
         try: self.stopStreamingMediaFileToChannel()
         except Exception: pass
         if self.current_temp: self.current_temp.cleanup(); self.current_temp = None

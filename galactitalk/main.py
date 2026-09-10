@@ -4,6 +4,7 @@ import argparse
 import configparser
 import os
 from pathlib import Path
+import signal
 import sys
 
 from .bot import Connection, RuntimeControl, tt
@@ -40,6 +41,8 @@ def run(config_path: Path) -> int:
         cache_path = config_path.parent / cache_path
     cache = MediaCache(cache_path)
     control = RuntimeControl()
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: control.request_stop())
     connections = [Connection(server, config, config_path, ai, star, youtube, cache, control)
                    for server in config.servers if server.enabled]
     if not connections:
@@ -64,6 +67,7 @@ def run(config_path: Path) -> int:
         youtube.close()
         if ai:
             ai.close()
+        signal.signal(signal.SIGTERM, previous_sigterm)
     return EXIT_RESTART if control.restart else 0
 
 
@@ -72,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Path to the single INI configuration")
     parser.add_argument("--configure", action="store_true", help="Run the complete interactive configuration wizard")
     parser.add_argument("--check-config", action="store_true", help="Validate configuration without connecting")
+    parser.add_argument("--install-deps", action="store_true",
+                        help="Install or repair Python, yt-dlp, MPV, and PulseAudio dependencies, then exit")
     args = parser.parse_args(argv)
     path = Path(args.config).expanduser().resolve()
     if args.configure:

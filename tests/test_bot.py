@@ -7,11 +7,29 @@ from galactitalk.bot import COMMAND_HELP, Connection, tt
 
 
 class RoutingTests(unittest.TestCase):
-    def test_mentions_match_old_chatgpt_forms(self):
+    def test_chatgpt_mention_is_literal_and_case_insensitive(self):
         pattern = Connection._compile_mention("GalactiTalk")
-        self.assertEqual(pattern.match("@[GalactiTalk] hello").group(1), "hello")
-        self.assertEqual(pattern.match("@galactitalk: hello").group(1), "hello")
-        self.assertIsNone(pattern.match("hello @GalactiTalk"))
+        self.assertEqual(pattern.match("@ChatGPT hello").group(1), "hello")
+        self.assertEqual(pattern.match("@chatgpt: hello").group(1), "hello")
+        self.assertIsNone(pattern.match("@[ChatGPT] hello"))
+        self.assertIsNone(pattern.match("@GalactiTalk hello"))
+        self.assertIsNone(pattern.match("hello @chatgpt"))
+
+    def test_channel_chatgpt_mention_submits_text_directly(self):
+        submitted = []
+        connection = SimpleNamespace(
+            my_id=99, parts={}, mention=Connection._compile_mention("Anything"),
+            server=SimpleNamespace(name="one"),
+            _submit_ai=lambda key, user, prompt, reply: submitted.append((key, user, prompt)),
+            _send_channel=lambda *_: None,
+        )
+        message = SimpleNamespace(
+            nFromUserID=7, nMsgType=tt.TextMsgType.MSGTYPE_CHANNEL,
+            nChannelID=14, nToUserID=0, bMore=False,
+            szMessage=tt.ttstr("@ChAtGpT explain this"),
+        )
+        Connection.onCmdUserTextMessage(connection, message)
+        self.assertEqual(submitted, [("channel:one:14", 7, "explain this")])
 
     def test_bare_rate_routes_to_star(self):
         calls = []
@@ -46,12 +64,6 @@ class RoutingTests(unittest.TestCase):
         self.assertNotIn("h", COMMAND_HELP)
         self.assertTrue(all(text.startswith("Usage:") for text in COMMAND_HELP.values()))
 
-    def test_native_media_playback_has_per_stream_gain(self):
-        connection = SimpleNamespace(volume=50)
-        playback = Connection._playback(connection, False, 0)
-        self.assertEqual(playback.audioPreprocessor.nPreprocessor, tt.AudioPreprocessorType.TEAMTALK_AUDIOPREPROCESSOR)
-        self.assertEqual(playback.audioPreprocessor.ttpreprocessor.nGainLevel, tt.SoundLevel.SOUND_GAIN_DEFAULT)
-
     def test_star_completion_releases_stream_for_queue(self):
         started = []
         with tempfile.TemporaryDirectory() as directory:
@@ -59,13 +71,11 @@ class RoutingTests(unittest.TestCase):
             path.write_bytes(b"audio")
             connection = SimpleNamespace(
                 elapsed_ms=0, duration_ms=0, star_current=(path, 7, "voice"),
-                state="playing", current_track=None, preparing=False,
                 _send_private=lambda *_: None,
                 _start_waiting_stream=lambda: started.append(True),
             )
             info = SimpleNamespace(uElapsedMSec=1, uDurationMSec=1, nStatus=tt.MediaFileStatus.MFS_FINISHED)
             Connection.onStreamMediaFile(connection, info)
-            self.assertEqual(connection.state, "stopped")
             self.assertFalse(path.exists())
             self.assertEqual(started, [True])
 

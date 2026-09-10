@@ -11,16 +11,20 @@ server/channel connections; duplicate old bot accounts are retained as disabled
 
 ## Install and run
 
-Python 3.11 or newer and FFmpeg are recommended. Create an environment and run:
+Python 3.10 or newer is required. GalactiTalk creates its own virtual environment,
+installs its Python packages (including yt-dlp), and installs missing MPV and
+PulseAudio command-line packages through apt, dnf, pacman, or zypper. Run:
 
 ```bash
 cd ~/golactitalk
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
 python3 bot.py --check-config
 python3 bot.py
 ```
+
+On the first run, the operating system may ask for the sudo password needed to
+install system packages. To perform dependency setup by itself, without starting
+the bot, run `python3 bot.py --install-deps`. Later starts re-check the dependency
+manifest and repair missing packages automatically.
 
 Use the full combined interactive wizard at any time:
 
@@ -41,17 +45,18 @@ on macOS and Windows). `TEAMTALK_SDK_DIR` can select an unpacked SDK.
 
 ## Audio routing
 
-GalactiTalk does not initialize a TeamTalk sound input device, launch mpv, or
-depend on PulseAudio sinks. Each TeamTalk connection owns an independent SDK
-`StartStreamingMediaFileToChannelEx` session. YouTube audio is resolved and
-downloaded by yt-dlp, while STAR audio is written to a private temporary file;
-both are streamed directly by that connection. Pause, seek, and gain use the
-SDK's per-stream `MediaFilePlayback` controls. Speed changes are rendered with
-FFmpeg before streaming.
+YouTube media uses MPV and an entirely automatic per-playback audio route. Before
+each item starts, GalactiTalk creates a uniquely named PulseAudio null sink. MPV
+plays into that sink and the same server connection opens its monitor source as
+the TeamTalk voice input. Pause, seek, gain, and speed are controlled directly
+through MPV. When the item finishes, fails, is replaced, or is stopped,
+GalactiTalk closes the TeamTalk input and unloads the PulseAudio module, removing
+both the sink and its monitor source. PipeWire's PulseAudio compatibility server
+is supported. Users do not select or pre-create any audio devices.
 
-Because TeamTalk provides one outbound media stream per connection, STAR audio
-is queued while that connection is playing a media track. Other configured
-servers remain entirely independent.
+This MPV/PulseAudio path is used for media only. STAR keeps its native TeamTalk
+media-file stream. STAR requests wait while media is active on the same server;
+other configured servers remain entirely independent.
 
 ## Command interface
 
@@ -68,10 +73,11 @@ command list, or `help COMMAND` for detailed usage for any command. The old `h`,
 - `clear-all` — TeamTalk/admin-list administrators only.
 - `restart`, `quit` — administrators only.
 
-In a channel, address the bot and include the command:
+In a channel, the explicit ChatGPT trigger is `@chatgpt` (case-insensitive),
+regardless of the bot's current TeamTalk nickname:
 
 ```text
-@[GalactiTalk] gpt Explain why the sky is blue.
+@chatgpt Explain why the sky is blue.
 ```
 
 Channel and private conversation histories are separate, bounded, in memory,
