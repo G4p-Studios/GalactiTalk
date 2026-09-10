@@ -24,12 +24,13 @@ class PulseAudioMediaPlayer:
 
     def __init__(self, teamtalk, tt_module, name: str,
                  on_exit: Callable[[int, int, str], None],
-                 on_metadata: Callable[[int, str], None] | None = None) -> None:
+                 on_metadata: Callable[[int, str, bool], None] | None = None) -> None:
         self.teamtalk = teamtalk
         self.tt = tt_module
         self.name = re.sub(r"[^A-Za-z0-9_]", "_", name)[:32] or "server"
         self.on_exit = on_exit
-        self.on_metadata = on_metadata or (lambda _token, _title: None)
+        self.on_metadata = on_metadata or (
+            lambda _token, _title, _has_stream_metadata: None)
         self.process: subprocess.Popen | None = None
         self.module_id: int | None = None
         self.sink_name = ""
@@ -174,17 +175,18 @@ class PulseAudioMediaPlayer:
         while process.poll() is None:
             metadata = self._request(["get_property", "metadata"])
             media_title = self._request(["get_property", "media-title"])
-            title = self._metadata_title(metadata, media_title)
+            metadata_title = self._parse_metadata(metadata)
+            title = metadata_title or html.unescape(str(media_title or ""))
             if title and title != last_title:
                 last_title = title
-                self.on_metadata(token, title)
+                self.on_metadata(token, title, bool(metadata_title))
             time.sleep(0.25)
         _, errors = process.communicate()
         error_lines = [line.strip() for line in (errors or "").splitlines() if line.strip()]
         self.on_exit(token, process.returncode, "\n".join(error_lines[-12:]))
 
     @staticmethod
-    def _metadata_title(metadata, media_title) -> str:
+    def _parse_metadata(metadata) -> str:
         stream_name = title = artist = ""
         if isinstance(metadata, dict):
             for key, raw_value in metadata.items():
@@ -198,8 +200,11 @@ class PulseAudioMediaPlayer:
                     title = value
                 if "artist" in name:
                     artist = value
-        combined = " - ".join(value for value in (artist, title, stream_name) if value)
-        return combined or html.unescape(str(media_title or ""))
+        return " - ".join(value for value in (artist, title, stream_name) if value)
+
+    @classmethod
+    def _metadata_title(cls, metadata, media_title) -> str:
+        return cls._parse_metadata(metadata) or html.unescape(str(media_title or ""))
 
     def _request(self, command: list, *, attempts: int = 1):
         path = self.socket_path

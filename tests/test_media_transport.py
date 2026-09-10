@@ -22,6 +22,12 @@ class MediaTransportTests(unittest.TestCase):
             ),
             "Artist - Song",
         )
+        self.assertEqual(
+            PulseAudioMediaPlayer._parse_metadata(
+                {"icy-name": "Station", "icy-title": "Track"}),
+            "Track - Station",
+        )
+        self.assertEqual(PulseAudioMediaPlayer._parse_metadata({}), "")
 
     def test_playback_creates_and_removes_an_isolated_route(self):
         device = SimpleNamespace(szDeviceName="temporary.monitor", szDeviceID="", nMaxInputChannels=2,

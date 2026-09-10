@@ -28,6 +28,14 @@ from .config import MediaSettings, OpenAISettings, StarSettings
 USER_REVISION = 4
 
 
+def clean_track_filename(name: str) -> str:
+    """Apply TTMediaBot's track download filename substitutions."""
+    for character in ["\\", "/", "%", "*", "?", ":", '"', "|"] + [
+            chr(value) for value in range(1, 32)]:
+        name = name.replace(character, "_")
+    return name.strip()
+
+
 class VideosSearch(_VideosSearch):
     """Original TTMediaBot search client, updated for current HTTPX."""
 
@@ -380,8 +388,10 @@ class YouTubeService:
             raise self._explain_error(exc) from exc
 
     def download(self, track: Track, directory: Path) -> tuple[Path, bool]:
+        track_name = clean_track_filename(track.name) or "track"
         options = self._options() | {
-            "noplaylist": True, "outtmpl": str(directory / "media.%(ext)s"),
+            "noplaylist": True,
+            "outtmpl": str(directory / f"{track_name}.%(ext)s"),
             "restrictfilenames": True,
         }
         try:

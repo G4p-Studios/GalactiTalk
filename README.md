@@ -159,7 +159,7 @@ same connection. Additional STAR requests remain ordered in the STAR queue.
 | `sp [SPEED]` | Show or set playback speed from 0.25 through 4. |
 | `m [st\|rt\|tl\|rtl\|rnd]` | Show or select the playback mode. |
 | `gl` | Return the current item's original link or path. |
-| `dl` | Download and upload the current non-live track to the channel. |
+| `dl` | Download the current non-live track under its track name and upload it. |
 | `sv` | Show the sole searchable service, `yt`. |
 
 The retired favorites, recents, cache, moderation, ban, lock, and media-command
@@ -173,6 +173,10 @@ opens its monitor source as voice input. Pause, seek, volume, and speed operate
 through MPV. On stop, failure, replacement, or completion, GalactiTalk closes
 the TeamTalk input and unloads the null sink. Users do not create or select audio
 devices manually.
+
+When MPV exposes stream tags, the TeamTalk status replaces the source filename
+with TTMediaBot's `artist - title - station` metadata string. MPV's media title
+is used only as a fallback when real tags are unavailable.
 
 ## Run as a user service
 

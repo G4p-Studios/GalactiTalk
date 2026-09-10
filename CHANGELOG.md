@@ -12,6 +12,9 @@ All notable changes to GalactiTalk are documented here. The project follows
   order.
 - STAR synthesis now streams immediately and concurrently with active media on
   the same TeamTalk connection.
+- Stream metadata now replaces filenames in media status messages regardless of
+  how the stream URL was classified, and `dl` uploads use sanitized track names
+  instead of `media`.
 
 ## [0.1.0] - 2026-09-10
 

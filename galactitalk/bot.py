@@ -52,7 +52,7 @@ COMMAND_HELP = {
     "sp": "Usage: sp [SPEED]. Shows playback speed when omitted, or changes the active MPV playback speed from 0.25 through 4.",
     "m": "Usage: m [MODE]. Shows or selects media mode: st single, rt repeat track, tl list, rtl repeating list, or rnd random.",
     "gl": "Usage: gl. Returns the original link or path for the current media track.",
-    "dl": "Usage: dl. Downloads the current non-live track and uploads it to the TeamTalk channel when the bot account has upload rights.",
+    "dl": "Usage: dl. Downloads the current non-live track under its track name and uploads it to the TeamTalk channel when the bot account has upload rights.",
     "sv": "Usage: sv. Shows the active searchable media service. GalactiTalk intentionally provides only yt (YouTube/yt-dlp).",
 }
 
@@ -117,8 +117,9 @@ class Connection(tt.TeamTalk, threading.Thread):
             self, tt, server.name,
             lambda token, code, error: self.actions.put(
                 lambda token=token, code=code, error=error: self._media_exited(token, code, error)),
-            lambda token, title: self.actions.put(
-                lambda token=token, title=title: self._media_metadata(token, title)),
+            lambda token, title, has_metadata: self.actions.put(
+                lambda token=token, title=title, has_metadata=has_metadata:
+                self._media_metadata(token, title, has_metadata)),
         )
 
     @staticmethod
@@ -637,10 +638,11 @@ class Connection(tt.TeamTalk, threading.Thread):
             self._update_status()
             self._start_waiting_stream()
 
-    def _media_metadata(self, token: int, title: str) -> None:
+    def _media_metadata(self, token: int, title: str,
+                        has_stream_metadata: bool = False) -> None:
         if token != self.play_token or not self.current_track or self.state != "playing":
             return
-        if self.current_track.kind not in {"direct", "local"}:
+        if not has_stream_metadata and self.current_track.kind not in {"direct", "local"}:
             return
         if title != self.current_track.name:
             self.current_track.name = title

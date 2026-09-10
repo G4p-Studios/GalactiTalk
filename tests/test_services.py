@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from galactitalk.config import MediaSettings
-from galactitalk.services import Track, YouTubeService
+from galactitalk.services import Track, YouTubeService, clean_track_filename
 
 
 class YouTubeServiceTests(unittest.TestCase):
@@ -71,6 +71,32 @@ class YouTubeServiceTests(unittest.TestCase):
                     service.prepare(Track("https://youtube.test/watch?v=1"), Path(directory))
             finally:
                 service.close()
+
+    def test_download_uses_original_sanitized_track_name(self):
+        self.assertEqual(
+            clean_track_filename(' Artist/Title: 100%? "Live"| '),
+            "Artist_Title_ 100__ _Live__",
+        )
+        ydl = Mock()
+        manager = Mock()
+        manager.__enter__ = Mock(return_value=ydl)
+        manager.__exit__ = Mock(return_value=False)
+        with tempfile.TemporaryDirectory() as directory:
+            expected = Path(directory) / "Artist_Title_.m4a"
+            ydl.extract_info.return_value = {
+                "is_live": False,
+                "requested_downloads": [{"filepath": str(expected)}],
+            }
+            with patch("galactitalk.services.YoutubeDL", return_value=manager) as factory:
+                path, live = self.service.download(
+                    Track("https://youtube.test/watch?v=1", "Artist/Title?"),
+                    Path(directory),
+                )
+        self.assertEqual(path, expected)
+        self.assertFalse(live)
+        options = factory.call_args.args[0]
+        self.assertTrue(options["outtmpl"].endswith("Artist_Title_.%(ext)s"))
+        self.assertNotIn("media.%(ext)s", options["outtmpl"])
 
 
 if __name__ == "__main__":

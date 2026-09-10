@@ -150,10 +150,17 @@ class RoutingTests(unittest.TestCase):
 
         connection.state = "playing"
         connection.current_track.kind = "youtube"
-        Connection._media_metadata(connection, 4, "YouTube media title")
-        Connection._media_metadata(connection, 3, "Stale player")
+        Connection._media_metadata(connection, 4, "MPV filename fallback")
         self.assertEqual(connection.current_track.name, "Artist - Song - Station")
-        self.assertEqual(changes, ["Artist - Song - Station"])
+
+        Connection._media_metadata(connection, 4, "Live Artist - Live Song", True)
+        self.assertEqual(connection.current_track.name, "Live Artist - Live Song")
+        Connection._media_metadata(connection, 3, "Stale player")
+        self.assertEqual(connection.current_track.name, "Live Artist - Live Song")
+        self.assertEqual(changes, [
+            "Artist - Song - Station",
+            "Live Artist - Live Song",
+        ])
 
 
 if __name__ == "__main__":
